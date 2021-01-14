@@ -1,14 +1,6 @@
-// 2020.12.24 co2checker.ino by S.Koyama
-// 温度REFのSHT31(ADRジャンパでI2Cアドレス0x44)を接続すると
-// 冬モード時に温度インジケータの代わりにREF温度を表示し
-// 温度箇所に差分(補正温度-REF)を表示する→SCDOFFSET/SHTOFFSET/WIOOFFSETで補正する
 #define SCDOFFSET	2.2			// SCD30の温度オフセット(M5STACK)
 #define SHTOFFSET	1.1			// SHT31の温度オフセット(M5STACK)
 #define WIOOFFSET	2.2			// SCD30の温度オフセット(WIO)
-
-#ifndef __SAMD51__				// ----M5STACK----------
-#include <M5Stack.h>
-#endif										// ---------------------
 
 #include <LovyanGFX.hpp>
 static LGFX lcd;
@@ -21,17 +13,6 @@ Adafruit_SHT31 ref31=Adafruit_SHT31();
 // ----SCD30------------
 #include "SparkFun_SCD30_Arduino_Library.h"
 SCD30 SCD;
-
-#ifndef __SAMD51__				// ----M5STACK----------
-// ---CDM7160-----------
-#define CDM 0x69
-#define CDM_CTL		0x01
-#define CDM_ST1		0x02
-#define CDM_DAL		0x03
-#define CDM_DAH		0x04
-#define CDM_BUSY	0x08
-#define CDM_CAL	5
-#endif
 
 // ---------------------
 #define FONT123	&fonts::Font8
@@ -65,18 +46,13 @@ float tempbuf[AVESIZE], wbgtbuf[AVESIZE], tempREFbuf[AVESIZE];	// 平均値算�
 unsigned int ssON=0;			// 電源ONの残り時間(秒) / LCD点灯時間(秒)
 unsigned long lastmillis=0, Btnmillis[3]={0, 0, 0};
 int S[3]={0, 0, 0};				// ボタンの状態
-#ifdef __SAMD51__					// ----WIO--------------
+
 #define XOF	2							// LCDのX方向オフセット(WIOは左端が見えない!)
 #define YOF	0							// LCDのY方向オフセット
 #define LightL	5					// 明るさの下閾値
 #define LightH	10				// 明るさの上閾値
 int Btnpin[3]={WIO_KEY_C, WIO_KEY_B, WIO_KEY_A};
-#else											// ----M5STACK----------
-#define XOF	0							// LCDのX方向オフセット
-#define YOF	2							// LCDのY方向オフセット(M5STACKは下が見えない!)
-#define PowerONhour	9			// 電源ONの時間
-int Btnpin[3]={BUTTON_A_PIN, BUTTON_B_PIN, BUTTON_C_PIN};
-#endif										// ---------------------
+
 void Btnread(int i){									// 0:BtnA, 1:BtnB, 2:BtnC
 	int val=digitalRead(Btnpin[i]);
 	if(S[i]==0 && val==LOW){			S[i]=1;	Btnmillis[i]=millis();	}
@@ -87,19 +63,11 @@ void Btnread(int i){									// 0:BtnA, 1:BtnB, 2:BtnC
 	else if(S[i]==5 && millis()>Btnmillis[i]+50)	S[i]=0;
 }
 void toneEx(int freq, int duration){	// Hz, ms
-#ifdef __SAMD51__					// ----WIO--------------
 	int t_us=1000000L/freq;
 	for(long i=0; i<duration*1000L; i+=t_us){
 		digitalWrite(WIO_BUZZER, 1);	delayMicroseconds(t_us/2);
 		digitalWrite(WIO_BUZZER, 0);	delayMicroseconds(t_us/2);
 	}
-#else											// ----M5STACK----------
-	ledcSetup(TONE_PIN_CHANNEL, freq, 10); 
-	ledcWrite(TONE_PIN_CHANNEL,0x1FF>>8); 
-	delay(duration);
-	ledcWriteTone(TONE_PIN_CHANNEL, 0);
-	digitalWrite(SPEAKER_PIN, 0); 
-#endif										// ---------------------
 }
 void measure(){						// 結果はco2ave, tempave, humiave, wbgt
 	float temp=tempL-1., tempREF=tempL-1.;
@@ -119,28 +87,10 @@ void measure(){						// 結果はco2ave, tempave, humiave, wbgt
 			co2=SCD.getCO2();											// CO2
 			if(co2>=10000||co2<200)	co2=-1;				// 200未満は無効
 			if(!isSHT){														// SHT31がなければSCDの温度・湿度
-#ifdef __SAMD51__					// ----WIO--------------
 				temp=SCD.getTemperature()-WIOOFFSET;// 温度(補正値)
-#else											// ----M5STACK----------
-				temp=SCD.getTemperature()-SCDOFFSET;// 温度(補正値)
-#endif
 				humi=SCD.getHumidity();							// 湿度
 			}
 		}
-#ifndef __SAMD51__				// ----M5STACK----------
-	}else{									// ---CDM7160-----------
-		Wire.beginTransmission(CDM); Wire.write(CDM_ST1);
-		if(Wire.endTransmission()==0){
-			Wire.requestFrom(CDM,1);
-			if((Wire.read()&CDM_BUSY)==0){				// CDM busyでなければデータリード
-				Wire.beginTransmission(CDM); Wire.write(CDM_DAL);
-				if(Wire.endTransmission()==0){
-					Wire.requestFrom(CDM,2); co2=Wire.read(); co2+=(Wire.read()<<8);
-					if(co2>=10000||co2<200)	co2=-1;		// 200未満は無効
-				}
-			}
-		}
-#endif										// ---------------------
 	}												// ---------------------
 	co2buf[pave]=co2;	humibuf[pave]=humi;	tempbuf[pave]=temp;	tempREFbuf[pave]=tempREF;
 //	Serial.println(String(temp)+","+humi+","+co2);	// 測定値の確認
@@ -307,16 +257,7 @@ void wbgtgraph(){
 }
 void setup(){
 	for(int i=0;i<3;i++)		pinMode(Btnpin[i], INPUT_PULLUP);
-#ifdef __SAMD51__					// ----WIO--------------
 	pinMode(WIO_BUZZER, OUTPUT);	pinMode(WIO_LIGHT, INPUT);
-#else											// ----M5STACK----------
-	pinMode(CDM_CAL, OUTPUT);			// G2ピンをCDMのcalに接続
-	digitalWrite(CDM_CAL, HIGH);	// 通常HIGH
-	M5.begin();
-	M5.Power.begin();
-	if(M5.Power.canControl()) M5.Power.setPowerBoostSet(true);
-	ledcSetup(TONE_PIN_CHANNEL, 0, 10);	ledcAttachPin(SPEAKER_PIN, TONE_PIN_CHANNEL);
-#endif										// ---------------------
 
 	lcd.init();		lcd.setRotation(1);
 	lcd.clear();	lcd.setBrightness(BRIGHTNESS);	// 0-255
@@ -325,25 +266,6 @@ void setup(){
 	isSCD=SCD.begin();			// SCD30の有無
 	isSHT=sht31.begin(SHT);	// SHT31の有無
 	isREF=ref31.begin(REF);	// SHT31(REF)の有無
-
-#ifndef __SAMD51__				// ----M5STACK----------
-	if(!isSCD){							// ---CDM7160-----------
-		Wire.beginTransmission(CDM);
-		Wire.write(CDM_CTL); Wire.write(0x06); Wire.endTransmission();
-	}												// ---------------------
-	Btnread(0);																	// BtnA
-	while(isPressed(0)){												// BtnA オフまで待つ
-		Btnread(0);																// BtnA
-		if(pressedFor(0, 1000)){									// BtnAが1秒押されたら
-			toneEx(1000, 50);												// ピッ
-			lcd.clear();
-			setCursorFont(0,50, FONTABC,2);	lcd.print("    Power OFF\n      after 9H");
-			delay(2000);	lcd.clear();
-			while(isPressed(0))	Btnread(0);					// BtnA オフまで待つ
-			ssON=PowerONhour*60*60;									// オン時間は9H
-		}
-	}
-#endif										// ---------------------
 
 	for(int i=0; i<AVESIZE; i++){	co2buf[i]=-1;	tempbuf[i]=tempL-1.;	humibuf[i]=-1;	wbgtbuf[i]=-1.;	}
 	for(int i=0; i<BUFSIZE; i++){	CO2BUF[i]=-1;	WBGTBUF[i]=-1.;	}
@@ -367,7 +289,6 @@ void loop(){
 			if(mode==4 && ss%15==0)	wbgtgraph();		// wbgtグラフは15秒毎に表示更新
 		}
 		ss=(ss+1)%60;															// ss: 0～59sec
-#ifdef __SAMD51__					// ----WIO--------------
 		int light=analogRead(WIO_LIGHT);
 		if(mode>0){																// モード1～4で
 			if(light>=LightH){											// 明るければ
@@ -376,38 +297,18 @@ void loop(){
 				if(ssON>0 && --ssON==0)	lcd.setBrightness(0);	// LCD消灯
 			}
 		}
-#else											// ----M5STACK----------
-		if(ssON>0 && --ssON==0)	M5.Power.deepSleep();		// 電源オフ(deepsleep)
-		if(ssON>0){						// 電源オンの残り時間 8×16
-			setCursorFont(280,220, FONTABC,.75);	lcd.printf("%d:%02d",ssON/60/60,ssON/60%60);
-		}
-#endif										// ---------------------
 	}
 	Btnread(0);																	// BtnA
-#ifndef __SAMD51__				// ----M5STACK----------
-	if(pressedFor(0, 1000)){										// BtnAが1秒押されたら
-		lcd.clear();	lcd.setBrightness(BRIGHTNESS);	// 0-255
-		setCursorFont(40,80, FONTABC,2);	lcd.print("Power OFF");		// 28×52
-		toneEx(1000, 50);													// ピッ
-		while(isPressed(0))	Btnread(0);						// BtnAオフまで待つ
-		delay(1000);
-		M5.Power.deepSleep();											// 電源オフ(deepsleep)
-	}else
-#endif										// ---------------------
 	if(wasReleased(0)){													// BtnAが押されたら
 		mode=(mode+1)%5;													// 表示モード切替 0-4
 		for(int i=0; i<mode; i++){	toneEx(1000, 50);	delay(100);	}	// ピピッ
 		lcd.clear();
 		if(mode==0){															// modeが0なら
-#ifdef __SAMD51__					// ----WIO--------------
 			ssON=0;
-#endif										// ---------------------
 			lcd.setBrightness(0);										// LCD消灯
 			toneEx(1000, 500);											// ピーッ
 		}else{																		// modeが1～4なら
-#ifdef __SAMD51__					// ----WIO--------------
 			ssON=10;																// 暗くても10秒は点灯
-#endif										// ---------------------
 			lcd.setBrightness(BRIGHTNESS);					// LCD点灯
 			if(mode==1){	tempprint();	humiprint();	co2print();	}// 温度・湿度・CO2(冬モード)
 			else if(mode==2){	wbgtprint();	co2print();		}	// WBGT・CO2(夏モード)
@@ -415,24 +316,4 @@ void loop(){
 			else if(mode==4){	wbgtgraph();	wbgtprint();	}	// wbgtグラフ
 		}
 	}
-#ifndef __SAMD51__				// ----M5STACK----------
-	Btnread(2);																	// BtnC
-	if(pressedFor(2, 2000)){										// BtnCが2秒押されたら
-		toneEx(1000, 50);													// ピッ
-		lcd.clear();
-		setCursorFont(0,50, FONTABC,2);	lcd.println(isSCD?"SCD30":"CDM7160");	// 28×52
-		lcd.setFont(FONTABC);	lcd.setTextSize(P14);	lcd.print("calibration ");
-		if(isSCD)	SCD.setForcedRecalibrationFactor(400);// SCD30キャリブレーション
-		else{
-			digitalWrite(CDM_CAL, LOW);							// CDM7160キャリブレーション
-			for(int i=0;i<6;i++){	delay(500);	lcd.print(".");	}
-			digitalWrite(CDM_CAL, HIGH);
-		}
-		lcd.print(" DONE.");	delay(1000);
-		while(isPressed(2))	Btnread(2);						// BtnCオフまで待つ
-		lcd.clear();
-		for(int i=0; i<AVESIZE; i++)	co2buf[i]=-1;
-		for(int i=0; i<BUFSIZE; i++)	CO2BUF[i]=-1;
-	}
-#endif										// ---------------------
 }
