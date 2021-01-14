@@ -1,15 +1,7 @@
-#define SCDOFFSET	2.2			// SCD30の温度オフセット(M5STACK)
-#define SHTOFFSET	1.1			// SHT31の温度オフセット(M5STACK)
-#define WIOOFFSET	2.2			// SCD30の温度オフセット(WIO)
-
-#include "Adafruit_SHT31.h"
-#define SHT 0x45
-#define REF 0x44
-Adafruit_SHT31 sht31 = Adafruit_SHT31();
-Adafruit_SHT31 ref31 = Adafruit_SHT31();
-
 #include "SparkFun_SCD30_Arduino_Library.h"
 SCD30 SCD;
+
+#define WIOOFFSET	2.2			// SCD30の温度オフセット(WIO)
 
 #define tempL	(-20.)			// 温度の有効最低値
 #define AVESIZE	10
@@ -17,8 +9,6 @@ SCD30 SCD;
 #define BRIGHTNESS 127			// 0-255
 
 bool isSCD = false;				// SCD30 or CDM7160
-bool isSHT = false;				// SHT31
-bool isREF = false;				// SHT31(REF)
 
 int ss = 0;
 unsigned int ssON = 0;			// 電源ONの残り時間(秒) / LCD点灯時間(秒)
@@ -128,29 +118,14 @@ void measure()
 	float tempREF = tempL - 1.;
 	int co2 = -1;
 	int humi = -1;
-	if (isREF)							// REFは温度のreference
-	{
-		tempREF = ref31.readTemperature();				// 温度
-		if (isnan(tempREF)) tempREF = tempL - 1.;
-	}
-	if (isSHT)							// SHT31があれば
-	{
-		temp = sht31.readTemperature() - SHTOFFSET;	// 温度(補正値)
-		if (isnan(temp)) temp = tempL - 1.;
-		humi = sht31.readHumidity();					// 湿度
-		if (isnan(humi) || humi > 100 || humi < 0) humi = -1;
-	}
 	if (isSCD)							// ----SCD30------------
 	{
 		if (SCD.dataAvailable())
 		{
 			co2 = SCD.getCO2();										// CO2
 			if (co2 >= 10000 || co2 < 200) co2 = -1;				// 200未満は無効
-			if (!isSHT)												// SHT31がなければSCDの温度・湿度
-			{
-				temp = SCD.getTemperature() - WIOOFFSET;			// 温度(補正値)
-				humi = SCD.getHumidity();							// 湿度
-			}
+			temp = SCD.getTemperature() - WIOOFFSET;			// 温度(補正値)
+			humi = SCD.getHumidity();							// 湿度
 		}
 	}												// ---------------------
 //	Serial.println(String(temp)+","+humi+","+co2);	// 測定値の確認
@@ -345,8 +320,7 @@ void tempprint()
 	setCursorFont(128, 10, FONT123, P40);
 	if (tempave >= tempL)
 	{
-		if (isREF) lcd.printf(tempave - tempREFave > -10. && tempave - tempREFave < 10. ? "%6.1f" : "%5.1f", tempave - tempREFave);	// REFがあればtempとの差分を表示
-		else       lcd.printf(tempave              > -10. && tempave              < 10. ? "%6.1f" : "%5.1f", tempave             );	// なければ温度
+		lcd.printf(tempave > -10. && tempave < 10. ? "%6.1f" : "%5.1f", tempave);	// なければ温度
 	}
 	else           lcd.print("      - ");								// 8
 
@@ -354,8 +328,7 @@ void tempprint()
 	lcd.print("C");
 
 	setCursorFont(0, 10, FONT123, P40);
-	if (isREF) lcd.printf(tempREFave < 10. ? "%5.1f" : "%4.1f", tempREFave);	// REFがあればtempREF
-	else       lcd.fillRect(0, 0, 110, 76, tempColor(tempave));					// なければインジケータ
+	lcd.fillRect(0, 0, 110, 76, tempColor(tempave));					// なければインジケータ
 }
 
 // 湿度表示 --------
@@ -471,8 +444,6 @@ void setup()
 	lcd.setTextColor(TFT_WHITE, TFT_BLACK);
 	Wire.begin();
 	isSCD = SCD.begin();		// SCD30の有無
-	isSHT = sht31.begin(SHT);	// SHT31の有無
-	isREF = ref31.begin(REF);	// SHT31(REF)の有無
 
 	for (int i = 0; i < AVESIZE; ++i)
 	{
