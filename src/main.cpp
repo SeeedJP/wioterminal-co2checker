@@ -1,5 +1,4 @@
-#include "SparkFun_SCD30_Arduino_Library.h"
-SCD30 SCD;
+#include <Arduino.h>
 
 #define WIOOFFSET	2.2			// SCD30の温度オフセット(WIO)
 
@@ -7,8 +6,6 @@ SCD30 SCD;
 #define AVESIZE	10
 #define BUFSIZE 240
 #define BRIGHTNESS 127			// 0-255
-
-bool isSCD = false;				// SCD30 or CDM7160
 
 int ss = 0;
 unsigned int ssON = 0;			// 電源ONの残り時間(秒) / LCD点灯時間(秒)
@@ -92,6 +89,10 @@ void toneEx(int freq, int duration)
 ////////////////////////////////////////////////////////////////////////////////
 // Measure
 
+#include <GroveDriverPack.h>
+GroveBoard Board;
+GroveSCD30 Scd30(&Board.GroveI2C1);
+
 // 平均値算出用バッファ
 int pave = 0;
 int co2buf[AVESIZE];
@@ -118,17 +119,17 @@ void measure()
 	float tempREF = tempL - 1.;
 	int co2 = -1;
 	int humi = -1;
-	if (isSCD)							// ----SCD30------------
+
+	if (Scd30.ReadyToRead())
 	{
-		if (SCD.dataAvailable())
-		{
-			co2 = SCD.getCO2();										// CO2
-			if (co2 >= 10000 || co2 < 200) co2 = -1;				// 200未満は無効
-			temp = SCD.getTemperature() - WIOOFFSET;			// 温度(補正値)
-			humi = SCD.getHumidity();							// 湿度
-		}
-	}												// ---------------------
-//	Serial.println(String(temp)+","+humi+","+co2);	// 測定値の確認
+		Scd30.Read();
+	
+		co2 = Scd30.Co2Concentration;					// CO2
+		if (co2 >= 10000 || co2 < 200) co2 = -1;		// 200未満は無効
+		temp = Scd30.Temperature - WIOOFFSET;			// 温度(補正値)
+		humi = Scd30.Humidity;							// 湿度
+	}
+
 	co2buf[pave] = co2;
 	humibuf[pave] = humi;
 	tempbuf[pave] = temp;
@@ -432,6 +433,9 @@ void wbgtgraph()
 
 void setup()
 {
+	Serial.begin(115200);
+	delay(1000);
+
 	for (int i = 0; i < 3; ++i) pinMode(Btnpin[i], INPUT_PULLUP);
 	pinMode(WIO_BUZZER, OUTPUT);
 	pinMode(WIO_LIGHT, INPUT);
@@ -443,7 +447,9 @@ void setup()
 	lcd.setFont(FONT123);
 	lcd.setTextColor(TFT_WHITE, TFT_BLACK);
 	Wire.begin();
-	isSCD = SCD.begin();		// SCD30の有無
+
+	Board.GroveI2C1.Enable();
+	Scd30.Init();
 
 	for (int i = 0; i < AVESIZE; ++i)
 	{
