@@ -1,178 +1,93 @@
 #include <Arduino.h>
+#include "Sound.h"
+#include "Button.h"
 
-#define WIOOFFSET	2.2			// SCD30の温度オフセット(WIO)
+#define TEMP_OFFSET		(2.2)			// SCD30の温度オフセット(WIO)
 
-#define tempL	(-20.)			// 温度の有効最低値
-#define AVESIZE	10
-#define BUFSIZE 240
-#define BRIGHTNESS 127			// 0-255
+#define TEMP_LIMIT_LOW	(-20.)			// 温度の有効最低値
+#define AVESIZE			(5)
+#define BUFSIZE			(240)
+#define BRIGHTNESS		(127)			// 0-255
 
-int ss = 0;
-unsigned int ssON = 0;			// 電源ONの残り時間(秒) / LCD点灯時間(秒)
-unsigned long lastmillis = 0;
+#define XOF	2							// LCDのX方向オフセット(WIOは左端が見えない!)
+#define YOF	0							// LCDのY方向オフセット
+#define LightL	5						// 明るさの下閾値
+#define LightH	10						// 明るさの上閾値
 
-#define XOF	2					// LCDのX方向オフセット(WIOは左端が見えない!)
-#define YOF	0					// LCDのY方向オフセット
-#define LightL	5				// 明るさの下閾値
-#define LightH	10				// 明るさの上閾値
-
-////////////////////////////////////////////////////////////////////////////////
-// Button
-
-#define isPressed(b)		(S[b]==1||S[b]==2||S[b]==3)
-#define isReleased(b)		(S[b]==0||S[b]==4||S[b]==5)
-#define wasPressed(b)		(S[b]==1)
-#define wasReleased(b)		(S[b]==4)
-#define pressedFor(b,t)		(S[b]==3 && millis()>Btnmillis[b]+t)
-
-int Btnpin[3] = { WIO_KEY_C, WIO_KEY_B, WIO_KEY_A };
-int S[3] = { 0, 0, 0 };				// ボタンの状態
-unsigned long Btnmillis[3] = { 0, 0, 0 };
-
-// 0:BtnA, 1:BtnB, 2:BtnC
-void Btnread(int i)
-{
-	const int val = digitalRead(Btnpin[i]);
-	switch (S[i])
-	{
-	case 0:
-		if (val == LOW)
-		{
-			Btnmillis[i] = millis();
-			S[i] = 1;
-		}
-		break;
-	case 1:
-		S[i] = 2;
-		break;
-	case 2:
-		if (millis() > Btnmillis[i] + 50)
-		{
-			S[i] = 3;
-		}
-		break;
-	case 3:
-		if (val == HIGH)
-		{
-			Btnmillis[i] = millis();
-			S[i] = 4;
-		}
-		break;
-	case 4:
-		S[i] = 5;
-		break;
-	case 5:
-		if (millis() > Btnmillis[i] + 50)
-		{
-			S[i] = 0;
-		}
-		break;
-	}
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Tone
-
-// Hz, ms
-void toneEx(int freq, int duration)
-{
-	const int t_us = 1000000L / freq;
-	for (long i = 0; i < duration * 1000L; i += t_us)
-	{
-		digitalWrite(WIO_BUZZER, 1);
-		delayMicroseconds(t_us / 2);
-		digitalWrite(WIO_BUZZER, 0);
-		delayMicroseconds(t_us / 2);
-	}
-}
+static int Tick_ = 0;					// [秒]
+static unsigned int LcdOnRemain_ = 0;	// 電源ONの残り時間(秒) / LCD点灯時間(秒)
+static unsigned long WorkTime_;			// [ミリ秒]
 
 ////////////////////////////////////////////////////////////////////////////////
 // Measure
 
 #include <GroveDriverPack.h>
-GroveBoard Board;
-GroveSCD30 Scd30(&Board.GroveI2C1);
+#include "DequeLimitSize.h"
+
+static GroveBoard Board_;
+static GroveSCD30 SensorScd30_(&Board_.GroveI2C1);
 
 // 平均値算出用バッファ
-int pave = 0;
-int co2buf[AVESIZE];
-int humibuf[AVESIZE];
-float tempbuf[AVESIZE];
-float tempREFbuf[AVESIZE];
-float wbgtbuf[AVESIZE];
+static DequeLimitSize<int> AveBufCo2_(AVESIZE);
+static DequeLimitSize<int> AveBufHumi_(AVESIZE);
+static DequeLimitSize<float> AveBufTemp_(AVESIZE);
 
-int co2ave;
-int humiave;
-float tempave;
-float tempREFave;
-float wbgt;
-
-// グラフ表示用バッファ
-int pBUF = 0;
-int CO2BUF[BUFSIZE];
-int WBGTBUF[BUFSIZE];
+static int AveCo2_ = -1;
+static int AveHumi_ = -1;
+static float AveTemp_ = TEMP_LIMIT_LOW - 1.;
+static float AveWbgt_ = -1.;
 
 // 結果はco2ave, tempave, humiave, wbgt
-void measure()
+static void Measure()
 {
-	float temp = tempL - 1.;
-	float tempREF = tempL - 1.;
-	int co2 = -1;
-	int humi = -1;
-
-	if (Scd30.ReadyToRead())
+	if (SensorScd30_.ReadyToRead())
 	{
-		Scd30.Read();
+		SensorScd30_.Read();
 	
-		co2 = Scd30.Co2Concentration;					// CO2
-		if (co2 >= 10000 || co2 < 200) co2 = -1;		// 200未満は無効
-		temp = Scd30.Temperature - WIOOFFSET;			// 温度(補正値)
-		humi = Scd30.Humidity;							// 湿度
+		if (!isnan(SensorScd30_.Co2Concentration) && 200 <= SensorScd30_.Co2Concentration && SensorScd30_.Co2Concentration < 10000)
+		{
+			AveBufCo2_.push_back(SensorScd30_.Co2Concentration);
+			AveCo2_ = AveBufCo2_.size() >= 1 ? AveBufCo2_.average() : -1;
+			if (AveCo2_ >= 0) AveCo2_ = (AveCo2_ + 5) / 10 * 10; 
+		}
+		if (!isnan(SensorScd30_.Humidity))
+		{
+			AveBufHumi_.push_back(SensorScd30_.Humidity);
+			AveHumi_ = AveBufHumi_.size() >= 1 ? AveBufHumi_.average() : -1;
+		}
+		if (!isnan(SensorScd30_.Temperature))
+		{
+			AveBufTemp_.push_back(SensorScd30_.Temperature);
+			AveTemp_ = AveBufTemp_.size() >= 1 ? AveBufTemp_.average() : TEMP_LIMIT_LOW - 1.;
+			if (AveTemp_ >= TEMP_LIMIT_LOW) AveTemp_ -= TEMP_OFFSET;
+		}
 	}
 
-	co2buf[pave] = co2;
-	humibuf[pave] = humi;
-	tempbuf[pave] = temp;
-	tempREFbuf[pave] = tempREF;
-
-	int co2count = 0;
-	int humicount = 0;
-	int tempcount = 0;
-	int tempREFcount = 0;
-	co2ave = 0;
-	humiave = 0;
-	tempave = 0.;
-	tempREFave = 0.;
-	for (int i = 0; i < AVESIZE; ++i)
+	if (AveBufHumi_.size() > 0 && AveBufTemp_.size() > 0)						// WBGTの計算(日本生気象学会の表)
 	{
-		if (co2buf[i]     >= 0    ){ co2ave     += co2buf[i]    ; co2count++;     }
-		if (humibuf[i]    >= 0    ){ humiave    += humibuf[i]   ; humicount++;    }
-		if (tempbuf[i]    >= tempL){ tempave    += tempbuf[i]   ; tempcount++;    }
-		if (tempREFbuf[i] >= tempL){ tempREFave += tempREFbuf[i]; tempREFcount++; }
-	}
-	co2ave     = (co2count     > 0 ? (co2ave / co2count + 5) / 10 * 10: -1          );	// 直近10秒間(5～6個)の平均(1の位を四捨五入)
-	humiave    = (humicount    > 0 ? humiave    / humicount           : -1          );	// 直近10秒間(5～6個)の平均
-	tempave    = (tempcount    > 0 ? tempave    / tempcount           : (tempL - 1.));	// 直近10秒間(5～6個)の平均
-	tempREFave = (tempREFcount > 0 ? tempREFave / tempREFcount        : (tempL - 1.));	// *****
-//-----------------------------------------------------------------------------------
-//	co2ave=1270;	tempave=26.3;	humiave=63;	// 撮影用
-//	co2ave=random(0,5000)/10*10;tempave=random(-20*10,40*10)/10.;humiave=random(10,100);humicount=tempcount=1;	// 表示チェック用
-//-----------------------------------------------------------------------------------
-	if (humicount > 0 && tempcount > 0)						// WBGTの計算(日本生気象学会の表)
-	{
-		wbgt = -1.7 + .693 * tempave + .0388 * humiave + .00355 * humiave * tempave;
+		AveWbgt_ = -1.7 + .693 * AveTemp_ + .0388 * AveHumi_ + .00355 * AveHumi_ * AveTemp_;
 	}
 	else
 	{
-		wbgt = -1.;
+		AveWbgt_ = -1.;
 	}
-	wbgtbuf[pave] = wbgt;
-	pave = (pave + 1) % AVESIZE;		// pave: 0～9
-	if (ss % 15 == 0)					// 15秒毎
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// AppendGraph
+
+#include "DequeLimitSize.h"
+
+// グラフ表示用バッファ
+static DequeLimitSize<int> GraphBufCo2_(BUFSIZE);
+static DequeLimitSize<int> GraphBufWbgt_(BUFSIZE);
+
+static void AppendGraph()
+{
+	if (Tick_ % 15 == 0)					// 15秒毎
 	{
-		CO2BUF[pBUF] = co2ave;			// バッファに保存(グラフ表示用)
-		WBGTBUF[pBUF] = wbgt;
-		pBUF = (pBUF + 1) % BUFSIZE;	// pBUF: 0～239(1H)
+		GraphBufCo2_.push_back(AveCo2_);
+		GraphBufWbgt_.push_back(AveWbgt_);
 	}
 }
 
@@ -180,20 +95,56 @@ void measure()
 // Display
 
 #include <LovyanGFX.hpp>
-static LGFX lcd;
+static LGFX Lcd_;
 
 #define FONT123	&fonts::Font8
 #define FONTABC	&fonts::Font4
-#define setCursorFont(x,y,font,mag)	{lcd.setCursor(x,y);lcd.setFont(font);lcd.setTextSize(mag);}
-
 #define P8	8./14.
 #define P10	10./14.
 #define P14	14./14.
 #define P16	16./55.
 #define P40	40./55.
 #define P48	48./55.
+#define setCursorFont(x,y,font,mag)	{Lcd_.setCursor(x, y); Lcd_.setFont(font); Lcd_.setTextSize(mag); }
 
-int mode = 1;	// 0:OFF 1:温度・湿度・CO2(冬モード) 2:WBGT・CO2(夏モード) 3:CO2グラフ 4: WBGTグラフ
+static int Mode_ = 1;	// 0:OFF 1:温度・湿度・CO2(冬モード) 2:WBGT・CO2(夏モード) 3:CO2グラフ 4: WBGTグラフ
+
+// co2値の表示色
+int co2Color(int co2)
+{
+	if (co2 >= 1500)		return TFT_RED;			// 1500～
+	else if (co2 >= 1000)	return TFT_YELLOW;		// 1000～1500
+	else if (co2 >= 0)		return TFT_GREEN;		// ～1000
+	else					return TFT_BLACK;
+}
+
+// humi値の表示色
+int humiColor(int val)
+{
+	if (val >= 80)			return TFT_CYAN;		// 80～
+	else if (val >= 30)		return TFT_GREEN;		// 30～80
+	else if (val >= 0)		return TFT_WHITE;		// 0～30
+	else					return TFT_BLACK;
+}
+
+// temp値の表示色
+int tempColor(float val)
+{
+	if (val >= 28.)					return TFT_ORANGE;		// 28～
+	else if (val >= 17.)			return TFT_GREEN;		// 17～28
+	else if (val >= TEMP_LIMIT_LOW)	return TFT_CYAN;		// -20～17
+	else							return TFT_BLACK;
+}
+
+// wbgt値の表示色
+int wbgtColor(float val)
+{
+	if (val >= 31.)			return TFT_RED;			// 31～
+	else if (val >= 28.)	return TFT_ORANGE;		// 28～31
+	else if (val >= 25.)	return TFT_YELLOW;		// 25～28
+	else if (val >= 0.)		return TFT_GREEN;		// 0～25
+	else					return TFT_BLACK;
+}
 
 // co2値のy座標
 int yco2(int co2)
@@ -210,78 +161,41 @@ int ywbgt(float val)
 	return (y < 0 ? 0 : y);
 }
 
-// co2値の表示色
-int co2Color(int co2)
-{
-	if (co2 >= 1500)		return TFT_RED;			// 1500～
-	else if (co2 >= 1000)	return TFT_YELLOW;		// 1000～1500
-	else if (co2 >= 0)		return TFT_GREEN;		// ～1000
-	else					return TFT_BLACK;
-}
-
-// wbgt値の表示色
-int wbgtColor(float val)
-{
-	if (val >= 31.)			return TFT_RED;			// 31～
-	else if (val >= 28.)	return TFT_ORANGE;		// 28～31
-	else if (val >= 25.)	return TFT_YELLOW;		// 25～28
-	else if (val >= 0.)		return TFT_GREEN;		// 0～25
-	else					return TFT_BLACK;
-}
-
-// humi値の表示色
-int humiColor(int val)
-{
-	if (val >= 80)			return TFT_CYAN;		// 80～
-	else if (val >= 30)		return TFT_GREEN;		// 30～80
-	else if (val >= 0)		return TFT_WHITE;		// 0～30
-	else					return TFT_BLACK;
-}
-
-// temp値の表示色
-int tempColor(float val)
-{
-	if (val >= 28.)			return TFT_ORANGE;		// 28～
-	else if (val >= 17.)	return TFT_GREEN;		// 17～28
-	else if (val >= tempL)	return TFT_CYAN;		// -20～17
-	else					return TFT_BLACK;
-}
-
 // CO2表示 ---------
 void co2print()
 {
-	switch (mode)
-	{
+	switch (Mode_)
+	{	
 	case 1:	// 温度・湿度・CO2(冬モード)
 		setCursorFont(132, 174, FONT123, P40);
-		if (co2ave >= 100) lcd.printf(co2ave < 1000 ? "%5d" : "%4d", co2ave);
-		else               lcd.print("      - ");				// 8
+		if (AveCo2_ >= 100) Lcd_.printf(AveCo2_ < 1000 ? "%5d" : "%4d", AveCo2_);
+		else                Lcd_.print("      - ");				// 8
 
 		setCursorFont(260, 144, FONTABC, P14);
-		lcd.print("ppm");
+		Lcd_.print("ppm");
 
-		lcd.fillRect(0, 164, 110, 76, co2Color(co2ave));	// インジケータ
+		Lcd_.fillRect(0, 164, 110, 76, co2Color(AveCo2_));	// インジケータ
 		break;
 	case 2:	// WBGT・CO2(夏モード)
 		setCursorFont(120, 150, FONT123, P48);
-		if (co2ave >= 100) lcd.printf(co2ave < 1000 ? "%5d" : "%4d", co2ave);
-		else               lcd.print("      - ");				// 8
+		if (AveCo2_ >= 100) Lcd_.printf(AveCo2_ < 1000 ? "%5d" : "%4d", AveCo2_);
+		else                Lcd_.print("      - ");				// 8
 
 		setCursorFont(260, 120, FONTABC, P14);
-		lcd.print("ppm");
+		Lcd_.print("ppm");
 
-		lcd.fillRect(0, 123, 110, 116, co2Color(co2ave));	// インジケータ
+		Lcd_.fillRect(0, 123, 110, 116, co2Color(AveCo2_));	// インジケータ
 		break;
 	case 3:	// CO2グラフ
 		setCursorFont(241 + XOF, 10, FONTABC, P14);
-		lcd.print(" CO2");
+		Lcd_.print(" CO2");
 
 		setCursorFont(241 + XOF, 80, FONT123, P16);
-		if (co2ave >= 100) lcd.printf(co2ave < 1000 ? "%5d" : "%4d", co2ave);
-		else               lcd.print("      - ");				// 8
+		if (AveCo2_ >= 100) Lcd_.printf(AveCo2_ < 1000 ? "%5d" : "%4d", AveCo2_);
+		else                Lcd_.print("      - ");				// 8
 
 		setCursorFont(280, 60, FONTABC, P10);
-		lcd.print("ppm");
+		Lcd_.print("ppm");
 		break;
 	}
 }
@@ -289,28 +203,28 @@ void co2print()
 // WBGT表示 --------
 void wbgtprint()
 {
-	switch (mode)
+	switch (Mode_)
 	{
 	case 2:	// WBGT・CO2(夏モード)
 		setCursorFont(138, 24, FONT123, P48);
-		if (wbgt >= 0.) lcd.printf(wbgt < 10. ? "%5.1f" : "%4.1f", wbgt);
-		else            lcd.print("     - ");						// 7
+		if (AveWbgt_ >= 0.) Lcd_.printf(AveWbgt_ < 10. ? "%5.1f" : "%4.1f", AveWbgt_);
+		else                Lcd_.print("     - ");						// 7
 
 		setCursorFont(296, 0, FONTABC, P14);
-		lcd.print("C");
+		Lcd_.print("C");
 
-		lcd.fillRect(0, 0, 110, 116, wbgtColor(wbgt));		// インジケータ
+		Lcd_.fillRect(0, 0, 110, 116, wbgtColor(AveWbgt_));		// インジケータ
 		break;
 	case 4:	// WBGTグラフ
 		setCursorFont(241 + XOF, 10, FONTABC, P14);
-		lcd.print("WBGT");
+		Lcd_.print("WBGT");
 
 		setCursorFont(241 + XOF, 80, FONT123, P16);
-		if (wbgt >= 0.) lcd.printf(wbgt < 10. ? "%5.1f" : "%4.1f", wbgt);
-		else            lcd.print("     - ");						// 7
+		if (AveWbgt_ >= 0.) Lcd_.printf(AveWbgt_ < 10. ? "%5.1f" : "%4.1f", AveWbgt_);
+		else                Lcd_.print("     - ");						// 7
 
 		setCursorFont(300, 70, FONTABC, P10);
-		lcd.print("C");
+		Lcd_.print("C");
 		break;
 	}
 }
@@ -319,68 +233,66 @@ void wbgtprint()
 void tempprint()
 {
 	setCursorFont(128, 10, FONT123, P40);
-	if (tempave >= tempL)
-	{
-		lcd.printf(tempave > -10. && tempave < 10. ? "%6.1f" : "%5.1f", tempave);	// なければ温度
-	}
-	else           lcd.print("      - ");								// 8
+	if (AveTemp_ >= TEMP_LIMIT_LOW) Lcd_.printf(AveTemp_ > -10. && AveTemp_ < 10. ? "%6.1f" : "%5.1f", AveTemp_);	// なければ温度
+	else                            Lcd_.print("      - ");								// 8
 
 	setCursorFont(296, 0, FONTABC, P14);
-	lcd.print("C");
+	Lcd_.print("C");
 
 	setCursorFont(0, 10, FONT123, P40);
-	lcd.fillRect(0, 0, 110, 76, tempColor(tempave));					// なければインジケータ
+	Lcd_.fillRect(0, 0, 110, 76, tempColor(AveTemp_));					// なければインジケータ
 }
 
 // 湿度表示 --------
 void humiprint()
 {
 	setCursorFont(150, 92, FONT123, P40);
-	if (humiave >= 0) lcd.printf("%2d", humiave);
-	else              lcd.print("  - ");								// 4
+	if (AveHumi_ >= 0) Lcd_.printf("%2d", AveHumi_);
+	else               Lcd_.print("  - ");								// 4
 
 	setCursorFont(260, 82, FONTABC, P14);
-	lcd.print("%RH");
+	Lcd_.print("%RH");
 
-	lcd.fillRect(0, 82, 110, 76, humiColor(humiave));			// インジケータ
+	Lcd_.fillRect(0, 82, 110, 76, humiColor(AveHumi_));			// インジケータ
 }
 
 void co2graph()
 {
-	lcd.setFont(FONTABC);
-	lcd.setTextSize(P8);
+	Lcd_.setFont(FONTABC);
+	Lcd_.setTextSize(P8);
 	for (int i = 0; i <= BUFSIZE; ++i)
 	{
 		if (i % (10 * 4) == 0)				// 縦の補助線
 		{
-			lcd.drawFastVLine(i + XOF, 0, 239 - YOF, (i == 0 ? TFT_WHITE : TFT_DARKGREY));
+			Lcd_.drawFastVLine(i + XOF, 0, 239 - YOF, (i == 0 ? TFT_WHITE : TFT_DARKGREY));
 			if (i == 40)
 			{
 				for (int co2 = 1000; co2 <= 3000; co2 += 1000)
 				{
-					lcd.setCursor(1 + XOF, yco2(co2) + 1);
-					lcd.print(co2);
+					Lcd_.setCursor(1 + XOF, yco2(co2) + 1);
+					Lcd_.print(co2);
 				}
 			}
 		}
 		else
 		{
-			const int co2 = CO2BUF[(pBUF + i) % BUFSIZE];
+			const int blankSize = GraphBufCo2_.limitsize() - GraphBufCo2_.size();
+			const int co2 = i < blankSize ? -1 : GraphBufCo2_[i - blankSize];
 			if (co2 > 0)						// plot co2!!
 			{
-				lcd.drawFastVLine(i + XOF, 1        , yco2(co2)      , TFT_BLACK    );
-				lcd.drawFastVLine(i + XOF, yco2(co2), 238 - yco2(co2), co2Color(co2));
+				Lcd_.drawFastVLine(i + XOF, 1        , yco2(co2)      , TFT_BLACK    );
+				Lcd_.drawFastVLine(i + XOF, yco2(co2), 238 - yco2(co2), co2Color(co2));
 			}
 			else
 			{
-				lcd.drawFastVLine(i + XOF, 1, 238 - YOF, TFT_BLACK);	// 無効データ
+				Lcd_.drawFastVLine(i + XOF, 1, 238 - YOF, TFT_BLACK);	// 無効データ
 			}
 			for (int u = 0; u <= 3000; u += 500)
 			{
-				if (u == 0)                    lcd.drawPixel(i + XOF, yco2(u), TFT_WHITE   );	// X軸
-				else if (u == 1000 && co2 < u) lcd.drawPixel(i + XOF, yco2(u), TFT_YELLOW  );	// 1000ppm
-				else if (u == 1500 && co2 < u) lcd.drawPixel(i + XOF, yco2(u), TFT_RED     );	// 1500ppm
-				else                           lcd.drawPixel(i + XOF, yco2(u), TFT_DARKGREY);
+				if (u == 0)                    Lcd_.drawPixel(i + XOF, yco2(u), TFT_WHITE   );	// X軸
+				else if (u == 1000 && co2 < u) Lcd_.drawPixel(i + XOF, yco2(u), TFT_YELLOW  );	// 1000ppm
+				else if (u == 1500 && co2 < u) Lcd_.drawPixel(i + XOF, yco2(u), TFT_RED     );	// 1500ppm
+				else                           Lcd_.drawPixel(i + XOF, yco2(u), TFT_DARKGREY);
 			}
 		}
 	}
@@ -388,41 +300,42 @@ void co2graph()
 
 void wbgtgraph()
 {
-	lcd.setFont(FONTABC);
-	lcd.setTextSize(P8);
+	Lcd_.setFont(FONTABC);
+	Lcd_.setTextSize(P8);
 	for (int i = 0; i <= BUFSIZE; ++i)
 	{
 		if (i % (10 * 4) == 0)				// 縦の補助線
 		{
-			lcd.drawFastVLine(i + XOF, 0, 239 - YOF, (i == 0 ? TFT_WHITE : TFT_DARKGREY));
+			Lcd_.drawFastVLine(i + XOF, 0, 239 - YOF, (i == 0 ? TFT_WHITE : TFT_DARKGREY));
 			if (i == 40)
 			{
 				for (int val = 10; val <= 40; val += 10)
 				{
-					lcd.setCursor(1 + XOF, ywbgt(val) + (val == 10 ? -18 : 1));
-					lcd.print(val);
+					Lcd_.setCursor(1 + XOF, ywbgt(val) + (val == 10 ? -18 : 1));
+					Lcd_.print(val);
 				}
 			}
 		}
 		else
 		{
-			const float val = WBGTBUF[(pBUF + i) % BUFSIZE];
+			const int blankSize = GraphBufWbgt_.limitsize() - GraphBufWbgt_.size();
+			const float val = i < blankSize ? -1 : GraphBufWbgt_[i - blankSize];
 			if (val > 0.)						// plot wbgt!!
 			{
-				lcd.drawFastVLine(i + XOF, 1         , ywbgt(val)      , TFT_BLACK     );
-				lcd.drawFastVLine(i + XOF, ywbgt(val), 238 - ywbgt(val), wbgtColor(val));
+				Lcd_.drawFastVLine(i + XOF, 1         , ywbgt(val)      , TFT_BLACK     );
+				Lcd_.drawFastVLine(i + XOF, ywbgt(val), 238 - ywbgt(val), wbgtColor(val));
 			}
 			else
 			{
-				lcd.drawFastVLine(i + XOF, 1, 238 - YOF, TFT_BLACK);			// 無効データ
+				Lcd_.drawFastVLine(i + XOF, 1, 238 - YOF, TFT_BLACK);			// 無効データ
 			}
 			for (int u = 10; u <= 40; u += 10)
 			{
-				if (u == 10) lcd.drawPixel(i + XOF, ywbgt(u), TFT_WHITE   );				// X軸
-				else         lcd.drawPixel(i + XOF, ywbgt(u), TFT_DARKGREY);				// 20,30,40度
-				lcd.drawPixel(i + XOF, ywbgt(25), (val < 25 ? TFT_YELLOW : TFT_DARKGREY));	// 25度
-				lcd.drawPixel(i + XOF, ywbgt(28), (val < 28 ? TFT_ORANGE : TFT_DARKGREY));	// 28度
-				lcd.drawPixel(i + XOF, ywbgt(31), (val < 31 ? TFT_RED    : TFT_DARKGREY));	// 31度
+				if (u == 10) Lcd_.drawPixel(i + XOF, ywbgt(u), TFT_WHITE   );				// X軸
+				else         Lcd_.drawPixel(i + XOF, ywbgt(u), TFT_DARKGREY);				// 20,30,40度
+				Lcd_.drawPixel(i + XOF, ywbgt(25), (val < 25 ? TFT_YELLOW : TFT_DARKGREY));	// 25度
+				Lcd_.drawPixel(i + XOF, ywbgt(28), (val < 28 ? TFT_ORANGE : TFT_DARKGREY));	// 28度
+				Lcd_.drawPixel(i + XOF, ywbgt(31), (val < 31 ? TFT_RED    : TFT_DARKGREY));	// 31度
 			}
 		}
 	}
@@ -431,108 +344,100 @@ void wbgtgraph()
 ////////////////////////////////////////////////////////////////////////////////
 // setup and loop
 
+static Sound Sound_(WIO_BUZZER);
+static Button Button_(WIO_KEY_C, INPUT_PULLUP, 0);
+
 void setup()
 {
 	Serial.begin(115200);
 	delay(1000);
 
-	for (int i = 0; i < 3; ++i) pinMode(Btnpin[i], INPUT_PULLUP);
-	pinMode(WIO_BUZZER, OUTPUT);
+	Button_.Init();
+	Sound_.Init();
 	pinMode(WIO_LIGHT, INPUT);
 
-	lcd.init();
-	lcd.setRotation(1);
-	lcd.clear();
-	lcd.setBrightness(BRIGHTNESS);	// 0-255
-	lcd.setFont(FONT123);
-	lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-	Wire.begin();
+	Lcd_.init();
+	Lcd_.setRotation(1);
+	Lcd_.clear();
+	Lcd_.setBrightness(BRIGHTNESS);	// 0-255
+	Lcd_.setFont(FONT123);
+	Lcd_.setTextColor(TFT_WHITE, TFT_BLACK);
 
-	Board.GroveI2C1.Enable();
-	Scd30.Init();
+	Board_.GroveI2C1.Enable();
+	SensorScd30_.Init();
 
-	for (int i = 0; i < AVESIZE; ++i)
-	{
-		co2buf[i] = -1;
-		tempbuf[i] = tempL - 1.;
-		humibuf[i] = -1;
-		wbgtbuf[i] = -1.;
-	}
-	for (int i = 0; i < BUFSIZE; ++i)
-	{
-		CO2BUF[i] = -1;
-		WBGTBUF[i] = -1.;
-	}
-	lastmillis = millis();
+	WorkTime_ = millis();
 }
 
 void loop()
 {
-	if (millis() > lastmillis + 1000)								// 1秒ごとに
+	if (millis() > WorkTime_ + 1000)								// 1秒ごとに
 	{
-		lastmillis = millis();
-		measure();													// 結果はco2ave, tempave, humiave, wbgt
+		WorkTime_ = millis();
+		
+		Measure();													// 結果はco2ave, tempave, humiave, wbgt
+		AppendGraph();
 
-		switch (mode)
+		switch (Mode_)
 		{
 		case 1:	// mode 1:温度・湿度・CO2(冬モード)
 			tempprint();											// 温度は1秒毎に表示更新
 			humiprint();											// 湿度は1秒毎に表示更新
-			if (ss % 5 == 0) co2print();							// co2値は5秒毎に表示更新
+			if (Tick_ % 5 == 0) co2print();							// co2値は5秒毎に表示更新
 			break;
 		case 2:	// mode 2:WBGT・CO2(夏モード)
 			wbgtprint();											// wbgt値は1秒毎に表示更新
-			if (ss % 5 == 0) co2print();							// co2値は5秒毎に表示更新
+			if (Tick_ % 5 == 0) co2print();							// co2値は5秒毎に表示更新
 			break;
 		case 3:	// mode 3:co2グラフ
 		case 4:	// mode 4:wbgtグラフ
 			wbgtprint();											// wbgt値を表示更新
-			if (ss % 5 == 0) co2print();							// co2値は5秒毎に表示更新
-			if (mode == 3 && ss % 15 == 0) co2graph();				// co2グラフは15秒毎に表示更新
-			if (mode == 4 && ss % 15 == 0) wbgtgraph();				// wbgtグラフは15秒毎に表示更新
+			if (Tick_ % 5 == 0) co2print();							// co2値は5秒毎に表示更新
+			if (Mode_ == 3 && Tick_ % 15 == 0) co2graph();			// co2グラフは15秒毎に表示更新
+			if (Mode_ == 4 && Tick_ % 15 == 0) wbgtgraph();			// wbgtグラフは15秒毎に表示更新
 			break;
 		}
 
-		ss = (ss + 1) % 60;											// ss: 0～59sec
+		Tick_ = (Tick_ + 1) % 60;									// ss: 0～59sec
 		const int light = analogRead(WIO_LIGHT);
-		if (mode > 0)												// モード1～4で
+		if (Mode_ > 0)												// モード1～4で
 		{
 			if (light >= LightH)									// 明るければ
 			{
-				ssON = 10;
-				lcd.setBrightness(BRIGHTNESS);						// LCD点灯
+				LcdOnRemain_ = 10;
+				Lcd_.setBrightness(BRIGHTNESS);						// LCD点灯
 			}
 			else if (light < LightL)
 			{
-				if (ssON > 0 && --ssON == 0)
+				if (LcdOnRemain_ > 0 && --LcdOnRemain_ == 0)
 				{
-					lcd.setBrightness(0);							// LCD消灯
+					Lcd_.setBrightness(0);							// LCD消灯
 				}
 			}
 		}
 	}
 
-	Btnread(0);														// BtnA
-	if (wasReleased(0))												// BtnAが押されたら
+	Button_.DoWork();
+	if (Button_.WasReleased())
 	{
-		mode = (mode + 1) % 5;										// 表示モード切替 0-4
-		for (int i = 0; i < mode; ++i)								// ピピッ
+		Mode_ = (Mode_ + 1) % 5;									// 表示モード切替 0-4
+		for (int i = 0; i < Mode_; ++i)								// ピピッ
 		{
-			toneEx(1000, 50);
+			Sound_.PlayTone(1000, 50);
 			delay(100);
 		}
-		lcd.clear();
-		if (mode == 0)												// modeが0なら
+		Lcd_.clear();
+		if (Mode_ == 0)												// modeが0なら
 		{
-			ssON = 0;
-			lcd.setBrightness(0);									// LCD消灯
-			toneEx(1000, 500);										// ピーッ
+			LcdOnRemain_ = 0;
+			Lcd_.setBrightness(0);									// LCD消灯
+			Sound_.PlayTone(1000, 500);								// ピーッ
 		}
 		else														// modeが1～4なら
 		{
-			ssON = 10;												// 暗くても10秒は点灯
-			lcd.setBrightness(BRIGHTNESS);							// LCD点灯
-			switch (mode)
+			LcdOnRemain_ = 10;										// 暗くても10秒は点灯
+			Lcd_.setBrightness(BRIGHTNESS);							// LCD点灯
+			switch (Mode_)
 			{
 			case 1:	// 温度・湿度・CO2(冬モード)
 				tempprint();
