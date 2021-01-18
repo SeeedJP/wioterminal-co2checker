@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "Sound.h"
+#include "Hw/Sound.h"
 
 Sound::Sound(int pin) :
 	Pin_{ pin }

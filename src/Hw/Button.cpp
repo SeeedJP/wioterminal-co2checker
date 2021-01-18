@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "Button.h"
+#include "Hw/Button.h"
 
 // #define isPressed(b)		    (S[b]==1||S[b]==2||S[b]==3)
 // #define isReleased(b)		(S[b]==0||S[b]==4||S[b]==5)

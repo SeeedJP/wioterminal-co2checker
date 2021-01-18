@@ -1,7 +1,6 @@
 #pragma once
 
 #include <deque>
-//#include <iterator>
 #include <numeric>
 
 template<class T>
