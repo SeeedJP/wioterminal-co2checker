@@ -20,6 +20,12 @@ static int Tick_ = 0;					// [秒]
 static unsigned long WorkTime_;			// [ミリ秒]
 
 ////////////////////////////////////////////////////////////////////////////////
+// Network
+
+#include "Network/WiFiManager.h"
+#include "Network/TimeManager.h"
+
+////////////////////////////////////////////////////////////////////////////////
 // setup and loop
 
 void setup()
@@ -36,6 +42,36 @@ void setup()
 	MeasureInit();
 	SeriesInit();
 	DisplayInit();
+
+    ////////////////////
+    // Connect Wi-Fi
+
+    Serial.printf("Connecting to SSID: %s\n", IOT_CONFIG_WIFI_SSID);
+	WiFiManager wifiManager;
+	wifiManager.Connect(IOT_CONFIG_WIFI_SSID, IOT_CONFIG_WIFI_PASSWORD);
+	while (!wifiManager.IsConnected())
+	{
+		Serial.print('.');
+		delay(500);
+	}
+	Serial.printf("Connected\n");
+
+    ////////////////////
+    // Sync time server
+	
+	Serial.printf("Sync time\n");
+	TimeManager timeManager;
+	while (!timeManager.Update())
+	{
+		Serial.print('.');
+		delay(1000);
+	}
+	Serial.printf("Synced.\n");
+
+
+
+
+
 
 	WorkTime_ = millis();
 }

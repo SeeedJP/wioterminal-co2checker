@@ -16,3 +16,6 @@ constexpr int WBGT_SERIES_INVERVAL = 15;    // [秒]
 
 constexpr int CO2_SERIES_NUMBER = 240;
 constexpr int WBGT_SERIES_NUMBER = 240;
+
+const char IOT_CONFIG_WIFI_SSID[] = "";
+const char IOT_CONFIG_WIFI_PASSWORD[] = "";
