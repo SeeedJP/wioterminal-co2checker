@@ -25,6 +25,91 @@ static unsigned long WorkTime_;			// [ミリ秒]
 #include "Network/WiFiManager.h"
 #include "Network/TimeManager.h"
 
+#include <rpcWiFiClientSecure.h>
+#include <PubSubClient.h>
+
+////////////////////////////////////////////////////////////////////////////////
+// Azure IoT DPS
+
+#include "Network/Certificate.h"
+#include "Helper/Signature.h"
+#include <AzureDpsClient.h>
+
+static AzureDpsClient DpsClient;
+static unsigned long DpsPublishTimeOfQueryStatus = 0;
+
+static void MqttSubscribeCallbackDPS(char* topic, byte* payload, unsigned int length);
+
+static WiFiClientSecure Tcp_;	// TODO
+
+static int RegisterDeviceToDPS(const std::string& endpoint, const std::string& idScope, const std::string& registrationId, const std::string& symmetricKey, const std::string& modelId, const uint64_t& expirationEpochTime, std::string* hubHost, std::string* deviceId)
+{
+    std::string endpointAndPort{ endpoint };
+    endpointAndPort += ":";
+    endpointAndPort += std::to_string(8883);
+
+    if (DpsClient.Init(endpointAndPort, idScope, registrationId) != 0) return -1;
+
+    const std::string mqttClientId = DpsClient.GetMqttClientId();
+    const std::string mqttUsername = DpsClient.GetMqttUsername();
+	std::string mqttPassword;
+	{
+		const std::vector<uint8_t> signature = DpsClient.GetSignature(expirationEpochTime);
+		const std::string encryptedSignature = GenerateEncryptedSignature(symmetricKey, signature);
+    	mqttPassword = DpsClient.GetMqttPassword(encryptedSignature, expirationEpochTime);
+	}
+
+    const std::string registerPublishTopic = DpsClient.GetRegisterPublishTopic();
+    const std::string registerSubscribeTopic = DpsClient.GetRegisterSubscribeTopic();
+
+	PubSubClient mqtt(Tcp_);
+
+    Tcp_.setCACert(ROOT_CA);
+    mqtt.setBufferSize(MQTT_PACKET_SIZE);
+    mqtt.setServer(endpoint.c_str(), 8883);
+    mqtt.setCallback(MqttSubscribeCallbackDPS);
+    if (!mqtt.connect(mqttClientId.c_str(), mqttUsername.c_str(), mqttPassword.c_str())) return -2;
+
+    mqtt.subscribe(registerSubscribeTopic.c_str());
+    mqtt.publish(registerPublishTopic.c_str(), String::format("{payload:{\"modelId\":\"%s\"}}").c_str());
+
+    while (!DpsClient.IsRegisterOperationCompleted())
+    {
+        mqtt.loop();
+        if (DpsPublishTimeOfQueryStatus > 0 && millis() >= DpsPublishTimeOfQueryStatus)
+        {
+            mqtt.publish(DpsClient.GetQueryStatusPublishTopic().c_str(), "");
+            DpsPublishTimeOfQueryStatus = 0;
+        }
+    }
+
+    if (!DpsClient.IsAssigned()) return -3;
+
+    mqtt.disconnect();
+
+    *hubHost = DpsClient.GetHubHost();
+    *deviceId = DpsClient.GetDeviceId();
+
+    return 0;
+}
+
+static void MqttSubscribeCallbackDPS(char* topic, byte* payload, unsigned int length)
+{
+    if (DpsClient.RegisterSubscribeWork(topic, std::vector<uint8_t>(payload, payload + length)) != 0)
+    {
+        Serial.printf("Failed to parse topic and/or payload\n");
+        return;
+    }
+
+    if (!DpsClient.IsRegisterOperationCompleted())
+    {
+        const int waitSeconds = DpsClient.GetWaitBeforeQueryStatusSeconds();
+        Serial.printf("Querying after %u  seconds...\n", waitSeconds);
+
+        DpsPublishTimeOfQueryStatus = millis() + waitSeconds * 1000;
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // setup and loop
 
@@ -46,9 +131,9 @@ void setup()
     ////////////////////
     // Connect Wi-Fi
 
-    Serial.printf("Connecting to SSID: %s\n", IOT_CONFIG_WIFI_SSID);
+    Serial.printf("Connecting to SSID: %s\n", WIFI_SSID);
 	WiFiManager wifiManager;
-	wifiManager.Connect(IOT_CONFIG_WIFI_SSID, IOT_CONFIG_WIFI_PASSWORD);
+	wifiManager.Connect(WIFI_SSID, WIFI_PASSWORD);
 	while (!wifiManager.IsConnected())
 	{
 		Serial.print('.');
@@ -68,9 +153,19 @@ void setup()
 	}
 	Serial.printf("Synced.\n");
 
-
-
-
+    Serial.printf("DPS:\n");
+    Serial.printf(" Endpoint = %s\n", DPS_GLOBAL_DEVICE_ENDPOINT);
+    Serial.printf(" Id scope = %s\n", DPS_ID_SCOPE);
+    Serial.printf(" Registration id = %s\n", DPS_REGISTRATION_ID);
+	std::string HubHost;
+	std::string DeviceId;
+    if (RegisterDeviceToDPS(DPS_GLOBAL_DEVICE_ENDPOINT, DPS_ID_SCOPE, DPS_REGISTRATION_ID, DPS_SYMMETRIC_KEY, MODEL_ID, timeManager.GetEpochTime() + TOKEN_LIFESPAN, &HubHost, &DeviceId) != 0)
+    {
+        Serial.printf("ERROR: RegisterDeviceToDPS()\n");
+    }
+    Serial.printf("Device provisioned:\n");
+    Serial.printf(" Hub host = %s\n", HubHost.c_str());
+    Serial.printf(" Device id = %s\n", DeviceId.c_str());
 
 
 	WorkTime_ = millis();

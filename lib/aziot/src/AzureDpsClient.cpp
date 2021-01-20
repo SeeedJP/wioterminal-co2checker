@@ -2,12 +2,12 @@
 #include <azure/core/az_result.h>
 #include <azure/core/az_span.h>
 
-static constexpr size_t SignatureMaxSize = 256;
-static constexpr size_t MqttClientIdMaxSize = 128;
-static constexpr size_t MqttUsernameMaxSize = 128;
-static constexpr size_t MqttPasswordMaxSize = 300;
-static constexpr size_t RegisterPublishTopicMaxSize = 128;
-static constexpr size_t QueryStatusPublishTopicMaxSize = 256;
+constexpr size_t SIGNATURE_MAX_SIZE = 256;
+constexpr size_t MQTT_CLIENT_ID_MAX_SIZE = 128;
+constexpr size_t MQTT_USERNAME_MAX_SIZE = 128;
+constexpr size_t MQTT_PASSWORD_MAX_SIZE = 300;
+constexpr size_t REGISTER_PUBLISH_TOPIC_MAX_SIZE = 128;
+constexpr size_t QUERY_STATUS_PUBLISH_TOPIC_MAX_SIZE = 256;
 
 AzureDpsClient::AzureDpsClient() :
     ResponseValid{ false }
@@ -32,7 +32,7 @@ int AzureDpsClient::Init(const std::string& endpoint, const std::string& idScope
 
 std::vector<uint8_t> AzureDpsClient::GetSignature(const uint64_t& expirationEpochTime)
 {
-    uint8_t signature[SignatureMaxSize];
+    uint8_t signature[SIGNATURE_MAX_SIZE];
     az_span signatureSpan = az_span_create(signature, sizeof(signature));
     az_span signatureValidSpan;
     if (az_result_failed(az_iot_provisioning_client_sas_get_signature(&ProvClient, expirationEpochTime, signatureSpan, &signatureValidSpan))) return std::vector<uint8_t>();
@@ -42,7 +42,7 @@ std::vector<uint8_t> AzureDpsClient::GetSignature(const uint64_t& expirationEpoc
 
 std::string AzureDpsClient::GetMqttClientId()
 {
-    char mqttClientId[MqttClientIdMaxSize];
+    char mqttClientId[MQTT_CLIENT_ID_MAX_SIZE];
     if (az_result_failed(az_iot_provisioning_client_get_client_id(&ProvClient, mqttClientId, sizeof(mqttClientId), NULL))) return std::string();
 
     return mqttClientId;
@@ -50,7 +50,7 @@ std::string AzureDpsClient::GetMqttClientId()
 
 std::string AzureDpsClient::GetMqttUsername()
 {
-    char mqttUsername[MqttUsernameMaxSize];
+    char mqttUsername[MQTT_USERNAME_MAX_SIZE];
     if (az_result_failed(az_iot_provisioning_client_get_user_name(&ProvClient, mqttUsername, sizeof(mqttUsername), NULL))) return std::string();
 
     return mqttUsername;
@@ -58,7 +58,7 @@ std::string AzureDpsClient::GetMqttUsername()
 
 std::string AzureDpsClient::GetMqttPassword(const std::string& encryptedSignature, const uint64_t& expirationEpochTime)
 {
-    char mqttPassword[MqttPasswordMaxSize];
+    char mqttPassword[MQTT_PASSWORD_MAX_SIZE];
     az_span encryptedSignatureSpan = az_span_create((uint8_t*)&encryptedSignature[0], encryptedSignature.size());
     if (az_result_failed(az_iot_provisioning_client_sas_get_password(&ProvClient, encryptedSignatureSpan, expirationEpochTime, AZ_SPAN_EMPTY, mqttPassword, sizeof(mqttPassword), NULL))) return std::string();
 
@@ -67,7 +67,7 @@ std::string AzureDpsClient::GetMqttPassword(const std::string& encryptedSignatur
 
 std::string AzureDpsClient::GetRegisterPublishTopic()
 {
-    char registerPublishTopic[RegisterPublishTopicMaxSize];
+    char registerPublishTopic[REGISTER_PUBLISH_TOPIC_MAX_SIZE];
     if (az_result_failed(az_iot_provisioning_client_register_get_publish_topic(&ProvClient, registerPublishTopic, sizeof(registerPublishTopic), NULL))) return std::string();
 
     return registerPublishTopic;
@@ -110,7 +110,7 @@ std::string AzureDpsClient::GetQueryStatusPublishTopic()
 {
     if (!ResponseValid) return std::string();
 
-    char queryStatusPublishTopic[QueryStatusPublishTopicMaxSize];
+    char queryStatusPublishTopic[QUERY_STATUS_PUBLISH_TOPIC_MAX_SIZE];
     if (az_result_failed(az_iot_provisioning_client_query_status_get_publish_topic(&ProvClient, Response.operation_id, queryStatusPublishTopic, sizeof(queryStatusPublishTopic), NULL))) return std::string();
 
     return queryStatusPublishTopic;

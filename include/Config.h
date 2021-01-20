@@ -17,5 +17,15 @@ constexpr int WBGT_SERIES_INVERVAL = 15;    // [秒]
 constexpr int CO2_SERIES_NUMBER = 240;
 constexpr int WBGT_SERIES_NUMBER = 240;
 
-const char IOT_CONFIG_WIFI_SSID[] = "";
-const char IOT_CONFIG_WIFI_PASSWORD[] = "";
+#define MODEL_ID    "dtmi:seeedkk:wioterminal:wioterminal_co2checker;1"
+
+constexpr int MQTT_PACKET_SIZE = 1024;
+constexpr int TOKEN_LIFESPAN = 3600;
+
+extern const char WIFI_SSID[];
+extern const char WIFI_PASSWORD[];
+
+extern const char DPS_GLOBAL_DEVICE_ENDPOINT[];
+extern const char DPS_ID_SCOPE[];
+extern const char DPS_REGISTRATION_ID[];
+extern const char DPS_SYMMETRIC_KEY[];

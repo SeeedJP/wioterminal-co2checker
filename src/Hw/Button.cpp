@@ -7,7 +7,7 @@
 // #define wasReleased(b)		(S[b]==4)
 // #define pressedFor(b,t)		(S[b]==3 && millis()>Btnmillis[b]+t)
 
-static constexpr unsigned long DebounceMs = 50;
+constexpr unsigned long DEBOUNCE_MS = 50;
 
 Button::Button(int pin, int pinMode, bool invert) :
     Pin_{ pin },
@@ -42,7 +42,7 @@ void Button::DoWork()
 		State_ = 2;
 		break;
 	case 2:
-		if (millis() > ChangeTime_ + DebounceMs)
+		if (millis() > ChangeTime_ + DEBOUNCE_MS)
 		{
 			State_ = 3;
 		}
@@ -58,7 +58,7 @@ void Button::DoWork()
 		State_ = 5;
 		break;
 	case 5:
-		if (millis() > ChangeTime_ + DebounceMs)
+		if (millis() > ChangeTime_ + DEBOUNCE_MS)
 		{
 			State_ = 0;
 		}
