@@ -27,12 +27,8 @@
         "schema": "double"
       },
       {
-        "@type": [
-          "Telemetry",
-          "Humidity"
-        ],
+        "@type": "Telemetry",
         "name": "humi",
-        "unit": "percent",
         "displayName": {
           "en": "Humidity",
           "ja": "湿度"
@@ -50,4 +46,3 @@
       }
     ]
   }
-  
