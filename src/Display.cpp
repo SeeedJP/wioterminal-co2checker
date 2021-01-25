@@ -24,31 +24,48 @@
 
 static LGFX Lcd_;
 
-static String Co2String()
+static String StringVFormat(const char* format, va_list arg)
 {
-	if (NullableIsNull(Co2Ave)) return "      - ";
-	if (Co2Ave < 1000) return String::format("%5d", Co2Ave);
-	return String::format("%4d", Co2Ave);
+    const int len = vsnprintf(nullptr, 0, format, arg);
+    char str[len + 1];
+    vsnprintf(str, sizeof(str), format, arg);
+
+    return String{ str };
 }
 
-static String HumiString()
+static int Round10(int val)
 {
-	if (NullableIsNull(HumiAve)) return "  - ";
-	return String::format("%2d", HumiAve);
+	if (NullableIsNull(val)) return val;
+
+	return (val + 5) / 10 * 10; 
 }
 
-static String TempString()
+static String Co2String(int val)
 {
-	if (NullableIsNull(TempAve)) return "      - ";
-	if (-10 < TempAve && TempAve < 10) return String::format("%6.1f", TempAve);
-	return String::format("%5.1f", TempAve);
+	if (NullableIsNull(val)) return "      - ";
+	const int roundVal = Round10(val);
+	if (roundVal < 1000) return String::format("%5d", roundVal);
+	return String::format("%4d", roundVal);
 }
 
-static String WbgtString()
+static String HumiString(int val)
 {
-	if (NullableIsNull(WbgtAve)) return "     - ";
-	if (WbgtAve < 10) return String::format("%5.1f", WbgtAve);
-	return String::format("%4.1f", WbgtAve);
+	if (NullableIsNull(val)) return "  - ";
+	return String::format("%2d", val);
+}
+
+static String TempString(float val)
+{
+	if (NullableIsNull(val)) return "      - ";
+	if (-10 < val && val < 10) return String::format("%6.1f", val);
+	return String::format("%5.1f", val);
+}
+
+static String WbgtString(float val)
+{
+	if (NullableIsNull(val)) return "     - ";
+	if (val < 10) return String::format("%5.1f", val);
+	return String::format("%4.1f", val);
 }
 
 // co2値のy座標
@@ -70,7 +87,7 @@ static void DisplayWinter(int tick, bool force)
 {
 	// Temp
 	setCursorFont(128, 10, FONT123, P40);
-	Lcd_.print(TempString());
+	Lcd_.print(TempString(TempAve));
 	setCursorFont(296, 0, FONTABC, P14);
 	Lcd_.print("C");
 	setCursorFont(0, 10, FONT123, P40);
@@ -78,7 +95,7 @@ static void DisplayWinter(int tick, bool force)
 
 	// Humi
 	setCursorFont(150, 92, FONT123, P40);
-	Lcd_.print(HumiString());
+	Lcd_.print(HumiString(HumiAve));
 	setCursorFont(260, 82, FONTABC, P14);
 	Lcd_.print("%RH");
 	Lcd_.fillRect(0, 82, 110, 76, DisplayColorHumi(HumiAve));
@@ -88,7 +105,7 @@ static void DisplayWinter(int tick, bool force)
 	{
 		// Co2
 		setCursorFont(132, 174, FONT123, P40);
-		Lcd_.print(Co2String());
+		Lcd_.print(Co2String(Co2Ave));
 		setCursorFont(260, 144, FONTABC, P14);
 		Lcd_.print("ppm");
 		Lcd_.fillRect(0, 164, 110, 76, DisplayColorCo2(Co2Ave));
@@ -99,7 +116,7 @@ static void DisplaySummer(int tick, bool force)
 {
 	// Wbgt
 	setCursorFont(138, 24, FONT123, P48);
-	Lcd_.print(WbgtString());
+	Lcd_.print(WbgtString(WbgtAve));
 	setCursorFont(296, 0, FONTABC, P14);
 	Lcd_.print("C");
 	Lcd_.fillRect(0, 0, 110, 116, DisplayColorWbgt(WbgtAve));
@@ -108,7 +125,7 @@ static void DisplaySummer(int tick, bool force)
 	{
 		// Co2
 		setCursorFont(120, 150, FONT123, P48);
-		Lcd_.print(Co2String());
+		Lcd_.print(Co2String(Co2Ave));
 		setCursorFont(260, 120, FONTABC, P14);
 		Lcd_.print("ppm");
 		Lcd_.fillRect(0, 123, 110, 116, DisplayColorCo2(Co2Ave));
@@ -123,7 +140,7 @@ static void DisplayChartCo2(int tick, bool force)
 		setCursorFont(241 + XOF, 10, FONTABC, P14);
 		Lcd_.print(" CO2");
 		setCursorFont(241 + XOF, 80, FONT123, P16);
-		Lcd_.print(Co2String());
+		Lcd_.print(Co2String(Co2Ave));
 		setCursorFont(280, 60, FONTABC, P10);
 		Lcd_.print("ppm");
 	}
@@ -178,7 +195,7 @@ static void DisplayChartWbgt(int tick, bool force)
 	setCursorFont(241 + XOF, 10, FONTABC, P14);
 	Lcd_.print("WBGT");
 	setCursorFont(241 + XOF, 80, FONT123, P16);
-	Lcd_.print(WbgtString());
+	Lcd_.print(WbgtString(WbgtAve));
 	setCursorFont(300, 70, FONTABC, P10);
 	Lcd_.print("C");
 
@@ -229,12 +246,12 @@ static void DisplayChartWbgt(int tick, bool force)
 
 void DisplayInit()
 {
-	Lcd_.init();
-	Lcd_.setRotation(1);
-	Lcd_.clear();
+    Lcd_.begin();
+    Lcd_.fillScreen(TFT_BLACK);
+    Lcd_.setTextScroll(true);
+    Lcd_.setTextColor(TFT_WHITE, TFT_BLACK);
+    Lcd_.setFont(&fonts::Font2);
 	Lcd_.setBrightness(LCD_BRIGHTNESS);
-	Lcd_.setFont(FONT123);
-	Lcd_.setTextColor(TFT_WHITE, TFT_BLACK);
 }
 
 void DisplayClear()
@@ -266,4 +283,14 @@ void DisplayRefresh(int tick, bool force)
 	default:
 		break;
 	}
+}
+
+void DisplayPrintf(const char* format, ...)
+{
+    va_list arg;
+    va_start(arg, format);
+    String str{ StringVFormat(format, arg) };
+    va_end(arg);
+
+	Lcd_.print(str);
 }

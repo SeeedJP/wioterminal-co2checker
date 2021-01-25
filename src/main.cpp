@@ -5,6 +5,9 @@
 #include "Hw/Sound.h"
 #include "Hw/Light.h"
 
+#include "Storage.h"
+#include "CliMode.h"
+
 #include "LcdOn.h"
 
 #include "Mode.h"
@@ -16,98 +19,93 @@ static Button Button_(WIO_KEY_C, INPUT_PULLUP, 0);
 static Sound Sound_(WIO_BUZZER);
 static Light Light_(WIO_LIGHT);
 
-static int Tick_ = 0;					// [秒]
-static unsigned long WorkTime_;			// [ミリ秒]
+static int Tick_ = 0;					// [sec.]
+static unsigned long WorkTime_;			// [msec.]
 
 ////////////////////////////////////////////////////////////////////////////////
 // Network
 
 #include "Network/WiFiManager.h"
 #include "Network/TimeManager.h"
+#include "AziotDps.h"
+#include "AziotHub.h"
+#include <azure/core/az_json.h>
+#include "Helper/Nullable.h"
 
-#include <rpcWiFiClientSecure.h>
-#include <PubSubClient.h>
+static TimeManager TimeManager_;
 
-////////////////////////////////////////////////////////////////////////////////
-// Azure IoT DPS
+static std::string HubHost_;
+static std::string DeviceId_;
 
-#include "Network/Certificate.h"
-#include "Helper/Signature.h"
-#include <AzureDpsClient.h>
-
-static AzureDpsClient DpsClient;
-static unsigned long DpsPublishTimeOfQueryStatus = 0;
-
-static void MqttSubscribeCallbackDPS(char* topic, byte* payload, unsigned int length);
-
-static WiFiClientSecure Tcp_;	// TODO
-
-static int RegisterDeviceToDPS(const std::string& endpoint, const std::string& idScope, const std::string& registrationId, const std::string& symmetricKey, const std::string& modelId, const uint64_t& expirationEpochTime, std::string* hubHost, std::string* deviceId)
+static void ConnectWiFi()
 {
-    std::string endpointAndPort{ endpoint };
-    endpointAndPort += ":";
-    endpointAndPort += std::to_string(8883);
-
-    if (DpsClient.Init(endpointAndPort, idScope, registrationId) != 0) return -1;
-
-    const std::string mqttClientId = DpsClient.GetMqttClientId();
-    const std::string mqttUsername = DpsClient.GetMqttUsername();
-	std::string mqttPassword;
+    DisplayPrintf("Connecting to SSID: %s\n", Storage::WiFiSSID.c_str());
+	WiFiManager wifiManager;
+	wifiManager.Connect(Storage::WiFiSSID.c_str(), Storage::WiFiPassword.c_str());
+	while (!wifiManager.IsConnected())
 	{
-		const std::vector<uint8_t> signature = DpsClient.GetSignature(expirationEpochTime);
-		const std::string encryptedSignature = GenerateEncryptedSignature(symmetricKey, signature);
-    	mqttPassword = DpsClient.GetMqttPassword(encryptedSignature, expirationEpochTime);
+		DisplayPrintf(".");
+		delay(500);
 	}
-
-    const std::string registerPublishTopic = DpsClient.GetRegisterPublishTopic();
-    const std::string registerSubscribeTopic = DpsClient.GetRegisterSubscribeTopic();
-
-	PubSubClient mqtt(Tcp_);
-
-    Tcp_.setCACert(ROOT_CA);
-    mqtt.setBufferSize(MQTT_PACKET_SIZE);
-    mqtt.setServer(endpoint.c_str(), 8883);
-    mqtt.setCallback(MqttSubscribeCallbackDPS);
-    if (!mqtt.connect(mqttClientId.c_str(), mqttUsername.c_str(), mqttPassword.c_str())) return -2;
-
-    mqtt.subscribe(registerSubscribeTopic.c_str());
-    mqtt.publish(registerPublishTopic.c_str(), String::format("{payload:{\"modelId\":\"%s\"}}").c_str());
-
-    while (!DpsClient.IsRegisterOperationCompleted())
-    {
-        mqtt.loop();
-        if (DpsPublishTimeOfQueryStatus > 0 && millis() >= DpsPublishTimeOfQueryStatus)
-        {
-            mqtt.publish(DpsClient.GetQueryStatusPublishTopic().c_str(), "");
-            DpsPublishTimeOfQueryStatus = 0;
-        }
-    }
-
-    if (!DpsClient.IsAssigned()) return -3;
-
-    mqtt.disconnect();
-
-    *hubHost = DpsClient.GetHubHost();
-    *deviceId = DpsClient.GetDeviceId();
-
-    return 0;
+	DisplayPrintf("Connected\n");
 }
 
-static void MqttSubscribeCallbackDPS(char* topic, byte* payload, unsigned int length)
+static void SyncTimeServer()
 {
-    if (DpsClient.RegisterSubscribeWork(topic, std::vector<uint8_t>(payload, payload + length)) != 0)
-    {
-        Serial.printf("Failed to parse topic and/or payload\n");
-        return;
-    }
+	DisplayPrintf("Sync time\n");
+	while (!TimeManager_.Update())
+	{
+		DisplayPrintf(".");
+		delay(1000);
+	}
+	DisplayPrintf("Synced.\n");
+}
 
-    if (!DpsClient.IsRegisterOperationCompleted())
+static void DeviceProvisioning()
+{
+	DisplayPrintf("Device provisioning:\n");
+    DisplayPrintf(" Id scope = %s\n", Storage::IdScope.c_str());
+    DisplayPrintf(" Registration id = %s\n", Storage::RegistrationId.c_str());
+    if (AziotDpsRegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
     {
-        const int waitSeconds = DpsClient.GetWaitBeforeQueryStatusSeconds();
-        Serial.printf("Querying after %u  seconds...\n", waitSeconds);
-
-        DpsPublishTimeOfQueryStatus = millis() + waitSeconds * 1000;
+        DisplayPrintf("ERROR: AziotDpsRegisterDevice()\n");
+		return;
     }
+    DisplayPrintf("Device provisioned:\n");
+    DisplayPrintf(" Hub host = %s\n", HubHost_.c_str());
+    DisplayPrintf(" Device id = %s\n", DeviceId_.c_str());
+}
+
+static void SendTelemetry()
+{
+    az_json_writer builder;
+    char payload[200];
+    if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payload), NULL))) return;
+    if (az_result_failed(az_json_writer_append_begin_object(&builder))) return;
+	if (!NullableIsNull(Co2Ave))
+	{
+		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("co2")))) return;
+		if (az_result_failed(az_json_writer_append_int32(&builder, Co2Ave))) return;
+	}
+	if (!NullableIsNull(HumiAve))
+	{
+		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("humi")))) return;
+		if (az_result_failed(az_json_writer_append_double(&builder, HumiAve, 0))) return;
+	}
+	if (!NullableIsNull(TempAve))
+	{
+		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("temp")))) return;
+		if (az_result_failed(az_json_writer_append_double(&builder, TempAve, 1))) return;
+	}
+	if (!NullableIsNull(WbgtAve))
+	{
+		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("wbgt")))) return;
+		if (az_result_failed(az_json_writer_append_double(&builder, WbgtAve, 3))) return;
+	}
+    if (az_result_failed(az_json_writer_append_end_object(&builder))) return;
+    const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&builder) };
+
+	AziotHubSendTelemetry(az_span_ptr(out_payload), az_span_size(out_payload));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -115,65 +113,64 @@ static void MqttSubscribeCallbackDPS(char* topic, byte* payload, unsigned int le
 
 void setup()
 {
+    ////////////////////
+    // Load storage
+
+    Storage::Load();
+
+    ////////////////////
+    // Init base component
+
 	Serial.begin(115200);
-	delay(1000);
+	DisplayInit();
+
+    ////////////////////
+    // Enter configuration mode
+
+    pinMode(WIO_KEY_A, INPUT_PULLUP);
+    pinMode(WIO_KEY_B, INPUT_PULLUP);
+    pinMode(WIO_KEY_C, INPUT_PULLUP);
+    delay(100);
+
+    if (digitalRead(WIO_KEY_A) == LOW &&
+        digitalRead(WIO_KEY_B) == LOW &&
+        digitalRead(WIO_KEY_C) == LOW   )
+    {
+        DisplayPrintf("In configuration mode\n");
+        CliMode();
+    }
+
+    ////////////////////
+    // Init hardware
 
 	Button_.Init();
 	Sound_.Init();
 	Light_.Init();
 
-	LcdOnInit(&Light_);
+    ////////////////////
+    // Init component
 
+	LcdOnInit(&Light_);
 	MeasureInit();
 	SeriesInit();
-	DisplayInit();
 
     ////////////////////
-    // Connect Wi-Fi
+    // Networking
 
-    Serial.printf("Connecting to SSID: %s\n", WIFI_SSID);
-	WiFiManager wifiManager;
-	wifiManager.Connect(WIFI_SSID, WIFI_PASSWORD);
-	while (!wifiManager.IsConnected())
+	if (!Storage::IdScope.empty())
 	{
-		Serial.print('.');
-		delay(500);
+		ConnectWiFi();
+		SyncTimeServer();
+		DeviceProvisioning();
 	}
-	Serial.printf("Connected\n");
 
-    ////////////////////
-    // Sync time server
-	
-	Serial.printf("Sync time\n");
-	TimeManager timeManager;
-	while (!timeManager.Update())
-	{
-		Serial.print('.');
-		delay(1000);
-	}
-	Serial.printf("Synced.\n");
-
-    Serial.printf("DPS:\n");
-    Serial.printf(" Endpoint = %s\n", DPS_GLOBAL_DEVICE_ENDPOINT);
-    Serial.printf(" Id scope = %s\n", DPS_ID_SCOPE);
-    Serial.printf(" Registration id = %s\n", DPS_REGISTRATION_ID);
-	std::string HubHost;
-	std::string DeviceId;
-    if (RegisterDeviceToDPS(DPS_GLOBAL_DEVICE_ENDPOINT, DPS_ID_SCOPE, DPS_REGISTRATION_ID, DPS_SYMMETRIC_KEY, MODEL_ID, timeManager.GetEpochTime() + TOKEN_LIFESPAN, &HubHost, &DeviceId) != 0)
-    {
-        Serial.printf("ERROR: RegisterDeviceToDPS()\n");
-    }
-    Serial.printf("Device provisioned:\n");
-    Serial.printf(" Hub host = %s\n", HubHost.c_str());
-    Serial.printf(" Device id = %s\n", DeviceId.c_str());
-
-
+	DisplayClear();
 	WorkTime_ = millis();
 }
 
 void loop()
 {
-	if (millis() > WorkTime_ + 1000)								// 1秒ごとに
+	if (millis() > WorkTime_ + 1000)
 	{
 		WorkTime_ = millis();
 		
@@ -186,7 +183,7 @@ void loop()
 		LcdOnUpdate();
 		DisplaySetBrightness(LcdOnIsOn() ? LCD_BRIGHTNESS : 0);
 
-		Tick_ = (Tick_ + 1) % 60;									// Tick_: 0～59sec
+		Tick_ = (Tick_ + 1) % 60;
 	}
 	else
 	{
@@ -198,10 +195,10 @@ void loop()
 			switch (ModeCurrent())
 			{
 			case Mode::OFF:
-				Sound_.PlayTone(1000, 500);							// ピーッ
+				Sound_.PlayTone(1000, 500);
 				break;
 			default:
-				for (int i = 0; i < static_cast<int>(ModeCurrent()); ++i)	// ピピッ
+				for (int i = 0; i < static_cast<int>(ModeCurrent()); ++i)
 				{
 					Sound_.PlayTone(1000, 50);
 					delay(100);
@@ -214,13 +211,50 @@ void loop()
 			case Mode::OFF:
 				DisplayClear();
 				LcdOnForce(false);
-				DisplaySetBrightness(0);							// LCD消灯
+				DisplaySetBrightness(0);
 				break;
 			default:
 				DisplayClear();
 				LcdOnForce(true);
-				DisplaySetBrightness(LCD_BRIGHTNESS);				// LCD点灯
+				DisplaySetBrightness(LCD_BRIGHTNESS);
 				DisplayRefresh(Tick_, true);
+			}
+		}
+	}
+
+    static unsigned long reconnectTime;
+	if (!Storage::IdScope.empty())
+	{
+		if (!AziotHubIsConnected())
+		{
+			Serial.printf("Connecting to Azure IoT Hub...\n");
+			const auto now = TimeManager_.GetEpochTime();
+			if (AziotHubConnect(HubHost_, DeviceId_, Storage::SymmetricKey, MODEL_ID, now + TOKEN_LIFESPAN) != 0)
+			{
+				Serial.printf("> ERROR. Try again in 5 seconds.\n");
+				delay(5000);
+				return;
+			}
+
+			Serial.printf("> SUCCESS.\n");
+			reconnectTime = now + TOKEN_LIFESPAN * RECONNECT_RATE;
+		}
+		else
+		{
+			if (TimeManager_.GetEpochTime() >= reconnectTime)
+			{
+				Serial.printf("Disconnect\n");
+				AziotHubDisconnect();
+				return;
+			}
+
+			AziotHubDoWork();
+
+			static unsigned long nextTelemetrySendTime = 0;
+			if (millis() > nextTelemetrySendTime)
+			{
+				SendTelemetry();
+				nextTelemetrySendTime = millis() + 15000;
 			}
 		}
 	}

@@ -35,7 +35,6 @@ void MeasureRead()
 		{
 			Co2AveBuf_.push_back(SensorScd30_.Co2Concentration);
 			Co2Ave = Co2AveBuf_.size() >= 1 ? Co2AveBuf_.average() : NullableNullValue<typeof(Co2Ave)>();
-			if (Co2Ave >= 0) Co2Ave = (Co2Ave + 5) / 10 * 10; 
 		}
 		if (!isnan(SensorScd30_.Humidity))
 		{
