@@ -10,6 +10,7 @@ static unsigned int LcdOnRemain_ = 0;	// 電源ONの残り時間[秒]
 void LcdOnInit(Light* light)
 {
     Light_ = light;
+	LcdOnRemain_ = LCD_ON_TIME;
 }
 
 void LcdOnForce(bool on)
