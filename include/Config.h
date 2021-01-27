@@ -20,5 +20,5 @@ constexpr int WBGT_SERIES_NUMBER = 240;
 extern const char MODEL_ID[];
 extern const char DPS_GLOBAL_DEVICE_ENDPOINT_HOST[];
 constexpr int MQTT_PACKET_SIZE = 1024;
-constexpr int TOKEN_LIFESPAN = 3600;        // [sec.]
+constexpr int TOKEN_LIFESPAN = 30 * 24 * 60 * 60;   // [sec.]
 constexpr float RECONNECT_RATE = 0.85;
