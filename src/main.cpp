@@ -163,6 +163,12 @@ void setup()
 		SyncTimeServer();
 		DeviceProvisioning();
 	}
+	else
+	{
+		// Power down the Wi-Fi module
+		pinMode(RTL8720D_CHIP_PU, OUTPUT);
+		digitalWrite(RTL8720D_CHIP_PU, LOW);
+	}
 
 	DisplayClear();
 	WorkTime_ = millis();
