@@ -1,6 +1,6 @@
-#include "Network/Certificate.h"
+#include "Network/Certificates.h"
 
-const char ROOT_CA[] =
+const char CERT_BALTIMORE_CYBERTRUST_ROOT_CA[] =
     "-----BEGIN CERTIFICATE-----\n"
     "MIIDdzCCAl+gAwIBAgIEAgAAuTANBgkqhkiG9w0BAQUFADBaMQswCQYDVQQGEwJJ\n"
     "RTESMBAGA1UEChMJQmFsdGltb3JlMRMwEQYDVQQLEwpDeWJlclRydXN0MSIwIAYD\n"

@@ -25,15 +25,15 @@ static unsigned long WorkTime_;			// [msec.]
 ////////////////////////////////////////////////////////////////////////////////
 // Network
 
-#include "Network/WiFiManager.h"
-#include "Network/TimeManager.h"
-#include "AziotDps.h"
-#include "AziotHub.h"
+#include <Network/WiFiManager.h>
+#include <Network/TimeManager.h>
+#include <Aziot/AziotDps.h>
+#include <Aziot/AziotHub.h>
 #include <azure/core/az_json.h>
 #include "Helper/Nullable.h"
 
 static TimeManager TimeManager_;
-
+static AziotHub& AziotHub_ = *AziotHub::Instance();
 static std::string HubHost_;
 static std::string DeviceId_;
 
@@ -66,11 +66,16 @@ static void DeviceProvisioning()
 	DisplayPrintf("Device provisioning:\n");
     DisplayPrintf(" Id scope = %s\n", Storage::IdScope.c_str());
     DisplayPrintf(" Registration id = %s\n", Storage::RegistrationId.c_str());
-    if (AziotDpsRegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
+
+	AziotDps& AziotDps_ = *AziotDps::Instance();
+	AziotDps_.SetMqttPacketSize(MQTT_PACKET_SIZE);
+
+    if (AziotDps_.RegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
     {
-        DisplayPrintf("ERROR: AziotDpsRegisterDevice()\n");
+        DisplayPrintf("ERROR: RegisterDevice()\n");
 		return;
     }
+
     DisplayPrintf("Device provisioned:\n");
     DisplayPrintf(" Hub host = %s\n", HubHost_.c_str());
     DisplayPrintf(" Device id = %s\n", DeviceId_.c_str());
@@ -79,8 +84,8 @@ static void DeviceProvisioning()
 static void SendTelemetry()
 {
     az_json_writer builder;
-    char payload[200];
-    if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payload), NULL))) return;
+    char payloadBuf[200];
+    if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payloadBuf), nullptr))) return;
     if (az_result_failed(az_json_writer_append_begin_object(&builder))) return;
 	if (!NullableIsNull(Co2Ave))
 	{
@@ -103,9 +108,9 @@ static void SendTelemetry()
 		if (az_result_failed(az_json_writer_append_double(&builder, WbgtAve, 3))) return;
 	}
     if (az_result_failed(az_json_writer_append_end_object(&builder))) return;
-    const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&builder) };
+    const az_span payload = az_json_writer_get_bytes_used_in_destination(&builder);
 
-	AziotHubSendTelemetry(az_span_ptr(out_payload), az_span_size(out_payload));
+	AziotHub_.SendTelemetry(az_span_ptr(payload), az_span_size(payload));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -162,6 +167,8 @@ void setup()
 		ConnectWiFi();
 		SyncTimeServer();
 		DeviceProvisioning();
+		
+		AziotHub_.SetMqttPacketSize(MQTT_PACKET_SIZE);
 	}
 	else
 	{
@@ -231,11 +238,11 @@ void loop()
     static unsigned long reconnectTime;
 	if (!Storage::IdScope.empty())
 	{
-		if (!AziotHubIsConnected())
+		if (!AziotHub_.IsConnected())
 		{
 			Serial.printf("Connecting to Azure IoT Hub...\n");
 			const auto now = TimeManager_.GetEpochTime();
-			if (AziotHubConnect(HubHost_, DeviceId_, Storage::SymmetricKey, MODEL_ID, now + TOKEN_LIFESPAN) != 0)
+			if (AziotHub_.Connect(HubHost_, DeviceId_, Storage::SymmetricKey, MODEL_ID, now + TOKEN_LIFESPAN) != 0)
 			{
 				Serial.printf("> ERROR. Try again in 5 seconds.\n");
 				delay(5000);
@@ -250,11 +257,11 @@ void loop()
 			if (TimeManager_.GetEpochTime() >= reconnectTime)
 			{
 				Serial.printf("Disconnect\n");
-				AziotHubDisconnect();
+				AziotHub_.Disconnect();
 				return;
 			}
 
-			AziotHubDoWork();
+			AziotHub_.DoWork();
 
 			static unsigned long nextTelemetrySendTime = 0;
 			if (millis() > nextTelemetrySendTime)

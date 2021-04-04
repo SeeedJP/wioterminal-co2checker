@@ -13,6 +13,8 @@ private:
 
 public:
     TimeManager();
+    TimeManager(const TimeManager&) = delete;
+    TimeManager& operator=(const TimeManager&) = delete;
     
     bool Update();
     unsigned long GetEpochTime() const;

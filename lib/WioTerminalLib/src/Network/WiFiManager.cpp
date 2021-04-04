@@ -1,6 +1,4 @@
-#include <Arduino.h>
 #include "Network/WiFiManager.h"
-
 #include <rpcWiFiClientSecure.h>
 
 void WiFiManager::Connect(const char* ssid, const char* password)

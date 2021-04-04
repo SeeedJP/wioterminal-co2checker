@@ -1,5 +1,5 @@
+#include "Network/TimeManager.h"
 #include <Arduino.h>
-#include <Network/TimeManager.h>
 
 TimeManager::TimeManager() :
     Client_(Udp_)
