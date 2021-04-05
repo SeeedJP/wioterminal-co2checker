@@ -15,6 +15,8 @@
 #include "Series.h"
 #include "Display.h"
 
+static unsigned long TelemetryInterval = 15000;	// [msec.]
+
 static Button Button_(WIO_KEY_C, INPUT_PULLUP, 0);
 static Sound Sound_(WIO_BUZZER);
 static Light Light_(WIO_LIGHT);
@@ -30,6 +32,7 @@ static unsigned long WorkTime_;			// [msec.]
 #include <Aziot/AziotDps.h>
 #include <Aziot/AziotHub.h>
 #include <azure/core/az_json.h>
+#include <ArduinoJson.h>
 #include "Helper/Nullable.h"
 
 static TimeManager TimeManager_;
@@ -81,10 +84,34 @@ static void DeviceProvisioning()
     DisplayPrintf(" Device id = %s\n", DeviceId_.c_str());
 }
 
+static void ReceivedTwinDocument(const char* json, const char* requestId)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant interval = doc["desired"]["TelemetryInterval"];
+	if (!interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+	}
+}
+
+static void ReceivedTwinDesiredPatch(const char* json, const char* version)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant interval = doc["TelemetryInterval"];
+	if (!interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+	}
+}
+
 static void SendTelemetry()
 {
     az_json_writer builder;
-    char payloadBuf[200];
+    char payloadBuf[JSON_MAX_SIZE];
     if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payloadBuf), nullptr))) return;
     if (az_result_failed(az_json_writer_append_begin_object(&builder))) return;
 	if (!NullableIsNull(Co2Ave))
@@ -169,6 +196,8 @@ void setup()
 		DeviceProvisioning();
 		
 		AziotHub_.SetMqttPacketSize(MQTT_PACKET_SIZE);
+		AziotHub_.ReceivedTwinDocumentCallback = ReceivedTwinDocument;
+		AziotHub_.ReceivedTwinDesiredPatchCallback = ReceivedTwinDesiredPatch;
 	}
 	else
 	{
@@ -251,6 +280,8 @@ void loop()
 
 			Serial.printf("> SUCCESS.\n");
 			reconnectTime = now + TOKEN_LIFESPAN * RECONNECT_RATE;
+
+			AziotHub_.RequestTwinDocument("get_twin");
 		}
 		else
 		{
@@ -267,7 +298,7 @@ void loop()
 			if (millis() > nextTelemetrySendTime)
 			{
 				SendTelemetry();
-				nextTelemetrySendTime = millis() + 15000;
+				nextTelemetrySendTime = millis() + TelemetryInterval;
 			}
 		}
 	}

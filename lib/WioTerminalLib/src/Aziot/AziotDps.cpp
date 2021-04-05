@@ -40,10 +40,11 @@ int AziotDps::RegisterDevice(const std::string& endpointHost, const std::string&
     Tcp_.setCACert(CERT_BALTIMORE_CYBERTRUST_ROOT_CA);
     mqtt.setBufferSize(MqttPacketSize_);
     mqtt.setServer(endpointHost.c_str(), 8883);
-    mqtt.setCallback(AziotDps::MqttSubscribeCallbackDPS);
+    mqtt.setCallback(AziotDps::MqttSubscribeCallback);
     if (!mqtt.connect(DpsClient_.GetMqttClientId().c_str(), DpsClient_.GetMqttUsername().c_str(), DpsClient_.GetMqttPassword().c_str())) return -3;
 
     mqtt.subscribe(DpsClient_.GetRegisterSubscribeTopic().c_str());
+    
     mqtt.publish(DpsClient_.GetRegisterPublishTopic().c_str(), String::format("{payload:{\"modelId\":\"%s\"}}", modelId.c_str()).c_str());
 
     while (!DpsClient_.IsRegisterOperationCompleted())
@@ -66,7 +67,7 @@ int AziotDps::RegisterDevice(const std::string& endpointHost, const std::string&
     return 0;
 }
 
-void AziotDps::MqttSubscribeCallbackDPS(char* topic, uint8_t* payload, unsigned int length)
+void AziotDps::MqttSubscribeCallback(char* topic, uint8_t* payload, unsigned int length)
 {
     if (DpsClient_.RegisterSubscribeWork(topic, std::vector<uint8_t>(payload, payload + length)) != 0)
     {

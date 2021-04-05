@@ -93,3 +93,45 @@ std::string EasyAziotHubClient::GetTelemetryPublishTopic()
 
     return telemetryPublishTopic;
 }
+
+std::string EasyAziotHubClient::GetTwinDocumentGetPublishTopic(const char* requestId)
+{
+    char twinDocumentGetPublishTopic[TWIN_DOCUMENT_GET_PUBLISH_TOPIC_MAX_SIZE];
+    if (az_result_failed(az_iot_hub_client_twin_document_get_publish_topic(&HubClient_, az_span_create_from_str(const_cast<char*>(requestId)), twinDocumentGetPublishTopic, sizeof(twinDocumentGetPublishTopic), nullptr))) return std::string();   // SDK_API
+
+    return twinDocumentGetPublishTopic;
+}
+
+int EasyAziotHubClient::ParseTwinTopic(const char* topic, EasyAziotHubClient::TwinResponse& twinResponse)
+{
+    az_iot_hub_client_twin_response response;
+    const az_span topicSpan = az_span_create_from_str(const_cast<char*>(topic));
+    if (az_result_failed(az_iot_hub_client_twin_parse_received_topic(&HubClient_, topicSpan, &response))) return -1;
+
+    if (az_span_size(response.request_id) <= 0)
+    {
+        twinResponse.RequestId.clear();
+    }
+    else
+    {
+        char requestId[az_span_size(response.request_id) + 1];
+        az_span_to_str(requestId, sizeof(requestId), response.request_id);
+        twinResponse.RequestId = requestId;
+    }
+
+    twinResponse.Status = response.status;
+    twinResponse.ResponseType = response.response_type;
+
+    if (az_span_size(response.version) <= 0)
+    {
+        twinResponse.Version.clear();
+    }
+    else
+    {
+        char version[az_span_size(response.version) + 1];
+        az_span_to_str(version, sizeof(version), response.version);
+        twinResponse.Version = version;
+    }
+
+    return 0;
+}

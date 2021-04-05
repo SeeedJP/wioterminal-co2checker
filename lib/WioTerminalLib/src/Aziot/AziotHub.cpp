@@ -8,6 +8,8 @@ static WiFiClientSecure Tcp_;	// TODO
 static PubSubClient Mqtt_(Tcp_);
 
 AziotHub* AziotHub::Instance_ = nullptr;
+std::function<void(const char* json, const char* requestId)> AziotHub::ReceivedTwinDocumentCallback;
+std::function<void(const char* json, const char* version)> AziotHub::ReceivedTwinDesiredPatchCallback;
 EasyAziotHubClient AziotHub::HubClient_;
 
 AziotHub* AziotHub::Instance()
@@ -51,12 +53,11 @@ int AziotHub::Connect(const std::string& host, const std::string& deviceId, cons
     Tcp_.setCACert(CERT_BALTIMORE_CYBERTRUST_ROOT_CA);
     Mqtt_.setBufferSize(MqttPacketSize_);
     Mqtt_.setServer(host.c_str(), 8883);
-//    Mqtt_.setCallback(MqttSubscribeCallbackHub);
-
+    Mqtt_.setCallback(MqttSubscribeCallback);
     if (!Mqtt_.connect(HubClient_.GetMqttClientId().c_str(), HubClient_.GetMqttUsername().c_str(), HubClient_.GetMqttPassword().c_str())) return -3;
 
-//    Mqtt_.subscribe(AZ_IOT_HUB_CLIENT_METHODS_SUBSCRIBE_TOPIC);
-//    Mqtt_.subscribe(AZ_IOT_HUB_CLIENT_C2D_SUBSCRIBE_TOPIC);
+    Mqtt_.subscribe(AZ_IOT_HUB_CLIENT_TWIN_RESPONSE_SUBSCRIBE_TOPIC);
+    Mqtt_.subscribe(AZ_IOT_HUB_CLIENT_TWIN_PATCH_SUBSCRIBE_TOPIC);
 
     return 0;
 }
@@ -80,5 +81,33 @@ void AziotHub::SendTelemetry(const void* payload, size_t payloadSize)
     {
         ++sendCount;
         Serial.printf("Sent telemetry %d\n", sendCount);
+    }
+}
+
+void AziotHub::RequestTwinDocument(const char* requestId)
+{
+    Mqtt_.publish(HubClient_.GetTwinDocumentGetPublishTopic(requestId).c_str(), nullptr);
+}
+
+void AziotHub::MqttSubscribeCallback(char* topic, uint8_t* payload, unsigned int length)
+{
+    Serial.printf("Received twin\n");
+    Serial.printf(" topic  :%s\n", topic);
+    Serial.printf(" payload:%.*s\n", length, payload);
+
+    EasyAziotHubClient::TwinResponse response;
+    if (HubClient_.ParseTwinTopic(topic, response) == 0)
+    {
+        std::string json(reinterpret_cast<char*>(payload), reinterpret_cast<char*>(payload) + length);
+
+        switch (response.ResponseType)
+        {
+        case AZ_IOT_HUB_CLIENT_TWIN_RESPONSE_TYPE_GET:
+            if (ReceivedTwinDocumentCallback != nullptr) ReceivedTwinDocumentCallback(json.c_str(), response.RequestId.c_str());
+            break;
+        case AZ_IOT_HUB_CLIENT_TWIN_RESPONSE_TYPE_DESIRED_PROPERTIES:
+            if (ReceivedTwinDesiredPatchCallback != nullptr) ReceivedTwinDesiredPatchCallback(json.c_str(), response.Version.c_str());
+            break;
+        }
     }
 }

@@ -8,6 +8,15 @@
 class EasyAziotHubClient
 {
 public:
+    struct TwinResponse
+    {
+        std::string RequestId;
+        az_iot_status Status;
+        az_iot_hub_client_twin_response_type ResponseType;
+        std::string Version;
+    };
+
+public:
     EasyAziotHubClient();
     EasyAziotHubClient(const EasyAziotHubClient&) = delete;
     EasyAziotHubClient& operator=(const EasyAziotHubClient&) = delete;
@@ -20,6 +29,9 @@ public:
     const std::string& GetMqttPassword() const;
 
     std::string GetTelemetryPublishTopic();
+    std::string GetTwinDocumentGetPublishTopic(const char* requestId);
+
+    int ParseTwinTopic(const char* topic, TwinResponse& twinResponse);
 
 private:
     std::string Host_;

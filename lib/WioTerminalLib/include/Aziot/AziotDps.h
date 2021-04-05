@@ -24,6 +24,6 @@ private:
 
     static EasyAziotDpsClient DpsClient_;
     static unsigned long DpsPublishTimeOfQueryStatus_;
-    static void MqttSubscribeCallbackDPS(char* topic, uint8_t* payload, unsigned int length);
+    static void MqttSubscribeCallback(char* topic, uint8_t* payload, unsigned int length);
 
 };

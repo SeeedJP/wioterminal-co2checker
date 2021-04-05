@@ -1,5 +1,5 @@
 {
-    "@id": "dtmi:seeedkk:wioterminal:wioterminal_co2checker;1",
+    "@id": "dtmi:seeedkk:wioterminal:wioterminal_co2checker;2",
     "@type": "Interface",
     "@context": "dtmi:dtdl:context;2",
     "displayName": "CO2 Checker - Seeed Wio Terminal",
@@ -45,6 +45,20 @@
           "ja": "暑さ指数"
         },
         "schema": "double"
+      },
+      {
+        "@type": [
+          "Property",
+          "TimeSpan"
+        ],
+        "name": "TelemetryInterval",
+        "unit": "second",
+        "displayName": {
+          "en": "Telemetry interval",
+          "ja": "送信間隔"
+        },
+        "schema": "integer",
+        "writable": true
       }
     ]
   }
