@@ -67,12 +67,12 @@ void AziotHub::Disconnect()
     Mqtt_.disconnect();
 }
 
-void AziotHub::SendTelemetry(const void* payload, size_t payloadSize)
+void AziotHub::SendTelemetry(const char* payload)
 {
     std::string telemetryTopic = HubClient_.GetTelemetryPublishTopic();
 
     static int sendCount = 0;
-    if (!Mqtt_.publish(telemetryTopic.c_str(), static_cast<const uint8_t*>(payload), payloadSize, false))
+    if (!Mqtt_.publish(telemetryTopic.c_str(), payload, false))
     {
         Serial.printf("ERROR: Send telemetry %d\n", sendCount);
         return; // TODO

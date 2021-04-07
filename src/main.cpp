@@ -31,7 +31,6 @@ static unsigned long WorkTime_;			// [msec.]
 #include <Network/TimeManager.h>
 #include <Aziot/AziotDps.h>
 #include <Aziot/AziotHub.h>
-#include <azure/core/az_json.h>
 #include <ArduinoJson.h>
 #include "Helper/Nullable.h"
 
@@ -86,34 +85,16 @@ static void DeviceProvisioning()
 
 static void SendTelemetry()
 {
-    az_json_writer builder;
-    char payloadBuf[JSON_MAX_SIZE];
-    if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payloadBuf), nullptr))) return;
-    if (az_result_failed(az_json_writer_append_begin_object(&builder))) return;
-	if (!NullableIsNull(Co2Ave))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("co2")))) return;
-		if (az_result_failed(az_json_writer_append_int32(&builder, Co2Ave))) return;
-	}
-	if (!NullableIsNull(HumiAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("humi")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, HumiAve, 0))) return;
-	}
-	if (!NullableIsNull(TempAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("temp")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, TempAve, 1))) return;
-	}
-	if (!NullableIsNull(WbgtAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("wbgt")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, WbgtAve, 3))) return;
-	}
-    if (az_result_failed(az_json_writer_append_end_object(&builder))) return;
-    const az_span payload = az_json_writer_get_bytes_used_in_destination(&builder);
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (!NullableIsNull(Co2Ave)) doc["co2"] = Co2Ave;
+	if (!NullableIsNull(HumiAve)) doc["humi"] = static_cast<float>(HumiAve);
+	if (!NullableIsNull(TempAve)) doc["temp"] = TempAve;
+	if (!NullableIsNull(WbgtAve)) doc["wbgt"] = WbgtAve;
 
-	AziotHub_.SendTelemetry(az_span_ptr(payload), az_span_size(payload));
+	char json[JSON_MAX_SIZE];
+	serializeJson(doc, json);
+
+	AziotHub_.SendTelemetry(json);
 }
 
 template <typename T>

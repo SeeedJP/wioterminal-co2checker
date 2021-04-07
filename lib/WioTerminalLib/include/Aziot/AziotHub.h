@@ -22,7 +22,7 @@ public:
     bool IsConnected();
     int Connect(const std::string& host, const std::string& deviceId, const std::string& symmetricKey, const std::string& modelId, const uint64_t& expirationEpochTime);
     void Disconnect();
-    void SendTelemetry(const void* payload, size_t payloadSize);
+    void SendTelemetry(const char* payload);
     void RequestTwinDocument(const char* requestId);
     void SendTwinPatch(const char* requestId, const char* payload);
 
