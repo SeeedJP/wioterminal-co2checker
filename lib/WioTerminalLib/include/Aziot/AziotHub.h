@@ -24,6 +24,7 @@ public:
     void Disconnect();
     void SendTelemetry(const void* payload, size_t payloadSize);
     void RequestTwinDocument(const char* requestId);
+    void SendTwinPatch(const char* requestId, const char* payload);
 
     static std::function<void(const char* json, const char* requestId)> ReceivedTwinDocumentCallback;
     static std::function<void(const char* json, const char* version)> ReceivedTwinDesiredPatchCallback;

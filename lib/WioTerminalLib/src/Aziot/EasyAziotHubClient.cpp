@@ -94,12 +94,20 @@ std::string EasyAziotHubClient::GetTelemetryPublishTopic()
     return telemetryPublishTopic;
 }
 
-std::string EasyAziotHubClient::GetTwinDocumentGetPublishTopic(const char* requestId)
+std::string EasyAziotHubClient::GetTwinDocumentPublishTopic(const char* requestId)
 {
-    char twinDocumentGetPublishTopic[TWIN_DOCUMENT_GET_PUBLISH_TOPIC_MAX_SIZE];
-    if (az_result_failed(az_iot_hub_client_twin_document_get_publish_topic(&HubClient_, az_span_create_from_str(const_cast<char*>(requestId)), twinDocumentGetPublishTopic, sizeof(twinDocumentGetPublishTopic), nullptr))) return std::string();   // SDK_API
+    char twinDocumentPublishTopic[TWIN_DOCUMENT_PUBLISH_TOPIC_MAX_SIZE];
+    if (az_result_failed(az_iot_hub_client_twin_document_get_publish_topic(&HubClient_, az_span_create_from_str(const_cast<char*>(requestId)), twinDocumentPublishTopic, sizeof(twinDocumentPublishTopic), nullptr))) return std::string();   // SDK_API
 
-    return twinDocumentGetPublishTopic;
+    return twinDocumentPublishTopic;
+}
+
+std::string EasyAziotHubClient::GetTwinPatchPublishTopic(const char* requestId)
+{
+    char twinPatchPublishTopic[TWIN_PATCH_PUBLISH_TOPIC_MAX_SIZE];
+    if (az_result_failed(az_iot_hub_client_twin_patch_get_publish_topic(&HubClient_, az_span_create_from_str(const_cast<char*>(requestId)), twinPatchPublishTopic, sizeof(twinPatchPublishTopic), nullptr))) return std::string();   // SDK_API
+
+    return twinPatchPublishTopic;
 }
 
 int EasyAziotHubClient::ParseTwinTopic(const char* topic, EasyAziotHubClient::TwinResponse& twinResponse)

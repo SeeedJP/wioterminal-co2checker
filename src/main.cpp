@@ -84,30 +84,6 @@ static void DeviceProvisioning()
     DisplayPrintf(" Device id = %s\n", DeviceId_.c_str());
 }
 
-static void ReceivedTwinDocument(const char* json, const char* requestId)
-{
-	StaticJsonDocument<JSON_MAX_SIZE> doc;
-	if (deserializeJson(doc, json)) return;
-	JsonVariant interval = doc["desired"]["TelemetryInterval"];
-	if (!interval.isNull())
-	{
-		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
-		TelemetryInterval = interval.as<int>() * 1000;
-	}
-}
-
-static void ReceivedTwinDesiredPatch(const char* json, const char* version)
-{
-	StaticJsonDocument<JSON_MAX_SIZE> doc;
-	if (deserializeJson(doc, json)) return;
-	JsonVariant interval = doc["TelemetryInterval"];
-	if (!interval.isNull())
-	{
-		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
-		TelemetryInterval = interval.as<int>() * 1000;
-	}
-}
-
 static void SendTelemetry()
 {
     az_json_writer builder;
@@ -138,6 +114,50 @@ static void SendTelemetry()
     const az_span payload = az_json_writer_get_bytes_used_in_destination(&builder);
 
 	AziotHub_.SendTelemetry(az_span_ptr(payload), az_span_size(payload));
+}
+
+template <typename T>
+static void SendConfirm(const char* requestId, const char* name, T value, int ackCode, int ackVersion)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	doc[name]["value"] = value;
+	doc[name]["ac"] = ackCode;
+	doc[name]["av"] = ackVersion;
+
+	char json[JSON_MAX_SIZE];
+	serializeJson(doc, json);
+
+	AziotHub_.SendTwinPatch(requestId, json);
+}
+
+static void ReceivedTwinDocument(const char* json, const char* requestId)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant ver = doc["desired"]["$version"];
+	JsonVariant interval = doc["desired"]["TelemetryInterval"];
+	if (!ver.isNull() && !interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+
+		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
+	}
+}
+
+static void ReceivedTwinDesiredPatch(const char* json, const char* version)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant ver = doc["$version"];
+	JsonVariant interval = doc["TelemetryInterval"];
+	if (!ver.isNull() && !interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+
+		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////

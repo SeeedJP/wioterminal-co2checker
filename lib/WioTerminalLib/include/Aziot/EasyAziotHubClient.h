@@ -29,7 +29,8 @@ public:
     const std::string& GetMqttPassword() const;
 
     std::string GetTelemetryPublishTopic();
-    std::string GetTwinDocumentGetPublishTopic(const char* requestId);
+    std::string GetTwinDocumentPublishTopic(const char* requestId);
+    std::string GetTwinPatchPublishTopic(const char* requestId);
 
     int ParseTwinTopic(const char* topic, TwinResponse& twinResponse);
 

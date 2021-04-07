@@ -86,14 +86,21 @@ void AziotHub::SendTelemetry(const void* payload, size_t payloadSize)
 
 void AziotHub::RequestTwinDocument(const char* requestId)
 {
-    Mqtt_.publish(HubClient_.GetTwinDocumentGetPublishTopic(requestId).c_str(), nullptr);
+    Mqtt_.publish(HubClient_.GetTwinDocumentPublishTopic(requestId).c_str(), nullptr);
+}
+
+void AziotHub::SendTwinPatch(const char* requestId, const char* payload)
+{
+    Mqtt_.publish(HubClient_.GetTwinPatchPublishTopic(requestId).c_str(), payload);
 }
 
 void AziotHub::MqttSubscribeCallback(char* topic, uint8_t* payload, unsigned int length)
 {
     Serial.printf("Received twin\n");
     Serial.printf(" topic  :%s\n", topic);
-    Serial.printf(" payload:%.*s\n", length, payload);
+    Serial.print("payload:");
+    for (int i = 0; i < static_cast<int>(length); i++) Serial.print(static_cast<char>(payload[i]));
+    Serial.println();
 
     EasyAziotHubClient::TwinResponse response;
     if (HubClient_.ParseTwinTopic(topic, response) == 0)

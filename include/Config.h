@@ -22,4 +22,4 @@ extern const char DPS_GLOBAL_DEVICE_ENDPOINT_HOST[];
 constexpr int MQTT_PACKET_SIZE = 1024;
 constexpr int TOKEN_LIFESPAN = 1 * 60 * 60; // [sec.]
 constexpr float RECONNECT_RATE = 0.85;
-constexpr int JSON_MAX_SIZE = 200;
+constexpr int JSON_MAX_SIZE = 1024;
