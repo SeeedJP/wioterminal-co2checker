@@ -115,6 +115,8 @@ void AziotHub::MqttSubscribeCallback(char* topic, uint8_t* payload, unsigned int
         case AZ_IOT_HUB_CLIENT_TWIN_RESPONSE_TYPE_DESIRED_PROPERTIES:
             if (ReceivedTwinDesiredPatchCallback != nullptr) ReceivedTwinDesiredPatchCallback(json.c_str(), response.Version.c_str());
             break;
+        case AZ_IOT_HUB_CLIENT_TWIN_RESPONSE_TYPE_REPORTED_PROPERTIES:
+            break;
         }
     }
 }
