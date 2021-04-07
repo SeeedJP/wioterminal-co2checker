@@ -1,5 +1,5 @@
 {
-    "@id": "dtmi:seeedkk:wioterminal:wioterminal_co2checker;1",
+    "@id": "dtmi:seeedkk:wioterminal:wioterminal_co2checker;2",
     "@type": "Interface",
     "@context": "dtmi:dtdl:context;2",
     "displayName": "CO2 Checker - Seeed Wio Terminal",
@@ -7,6 +7,7 @@
       {
         "@type": "Telemetry",
         "name": "co2",
+        "description": "The unit is ppm.",
         "displayName": {
           "en": "CO2 concentration",
           "ja": "二酸化炭素濃度"
@@ -38,11 +39,26 @@
       {
         "@type": "Telemetry",
         "name": "wbgt",
+        "description": "The WBGT (wet-bulb globe temperature) is a type of apparent temperature. The unit is degree Celsius.",
         "displayName": {
           "en": "WBGT",
           "ja": "暑さ指数"
         },
         "schema": "double"
+      },
+      {
+        "@type": [
+          "Property",
+          "TimeSpan"
+        ],
+        "name": "TelemetryInterval",
+        "unit": "second",
+        "displayName": {
+          "en": "Telemetry interval",
+          "ja": "送信間隔"
+        },
+        "schema": "integer",
+        "writable": true
       }
     ]
   }

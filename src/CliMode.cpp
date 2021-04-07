@@ -1,7 +1,7 @@
 #include <Arduino.h>
 #include "CliMode.h"
 #include "Storage.h"
-#include "Helper/Signature.h"
+#include <Network/Signature.h>
 
 #define END_CHAR        ('\r')
 #define TAB_CHAR        ('\t')
@@ -220,7 +220,7 @@ static void az_iotc_command(int argc, char** argv)
 
 static bool CliGetInput(char* inbuf, int* bp)
 {
-    if (inbuf == NULL) 
+    if (inbuf == nullptr) 
     {
         return false;
     }

@@ -15,6 +15,8 @@
 #include "Series.h"
 #include "Display.h"
 
+static unsigned long TelemetryInterval = 15000;	// [msec.]
+
 static Button Button_(WIO_KEY_C, INPUT_PULLUP, 0);
 static Sound Sound_(WIO_BUZZER);
 static Light Light_(WIO_LIGHT);
@@ -25,15 +27,15 @@ static unsigned long WorkTime_;			// [msec.]
 ////////////////////////////////////////////////////////////////////////////////
 // Network
 
-#include "Network/WiFiManager.h"
-#include "Network/TimeManager.h"
-#include "AziotDps.h"
-#include "AziotHub.h"
-#include <azure/core/az_json.h>
+#include <Network/WiFiManager.h>
+#include <Network/TimeManager.h>
+#include <Aziot/AziotDps.h>
+#include <Aziot/AziotHub.h>
+#include <ArduinoJson.h>
 #include "Helper/Nullable.h"
 
 static TimeManager TimeManager_;
-
+static AziotHub& AziotHub_ = *AziotHub::Instance();
 static std::string HubHost_;
 static std::string DeviceId_;
 
@@ -66,11 +68,16 @@ static void DeviceProvisioning()
 	DisplayPrintf("Device provisioning:\n");
     DisplayPrintf(" Id scope = %s\n", Storage::IdScope.c_str());
     DisplayPrintf(" Registration id = %s\n", Storage::RegistrationId.c_str());
-    if (AziotDpsRegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
+
+	AziotDps& AziotDps_ = *AziotDps::Instance();
+	AziotDps_.SetMqttPacketSize(MQTT_PACKET_SIZE);
+
+    if (AziotDps_.RegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
     {
-        DisplayPrintf("ERROR: AziotDpsRegisterDevice()\n");
+        DisplayPrintf("ERROR: RegisterDevice()\n");
 		return;
     }
+
     DisplayPrintf("Device provisioned:\n");
     DisplayPrintf(" Hub host = %s\n", HubHost_.c_str());
     DisplayPrintf(" Device id = %s\n", DeviceId_.c_str());
@@ -78,34 +85,60 @@ static void DeviceProvisioning()
 
 static void SendTelemetry()
 {
-    az_json_writer builder;
-    char payload[200];
-    if (az_result_failed(az_json_writer_init(&builder, AZ_SPAN_FROM_BUFFER(payload), NULL))) return;
-    if (az_result_failed(az_json_writer_append_begin_object(&builder))) return;
-	if (!NullableIsNull(Co2Ave))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("co2")))) return;
-		if (az_result_failed(az_json_writer_append_int32(&builder, Co2Ave))) return;
-	}
-	if (!NullableIsNull(HumiAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("humi")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, HumiAve, 0))) return;
-	}
-	if (!NullableIsNull(TempAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("temp")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, TempAve, 1))) return;
-	}
-	if (!NullableIsNull(WbgtAve))
-	{
-		if (az_result_failed(az_json_writer_append_property_name(&builder, AZ_SPAN_LITERAL_FROM_STR("wbgt")))) return;
-		if (az_result_failed(az_json_writer_append_double(&builder, WbgtAve, 3))) return;
-	}
-    if (az_result_failed(az_json_writer_append_end_object(&builder))) return;
-    const az_span out_payload{ az_json_writer_get_bytes_used_in_destination(&builder) };
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (!NullableIsNull(Co2Ave)) doc["co2"] = Co2Ave;
+	if (!NullableIsNull(HumiAve)) doc["humi"] = static_cast<float>(HumiAve);
+	if (!NullableIsNull(TempAve)) doc["temp"] = TempAve;
+	if (!NullableIsNull(WbgtAve)) doc["wbgt"] = WbgtAve;
 
-	AziotHubSendTelemetry(az_span_ptr(out_payload), az_span_size(out_payload));
+	char json[JSON_MAX_SIZE];
+	serializeJson(doc, json);
+
+	AziotHub_.SendTelemetry(json);
+}
+
+template <typename T>
+static void SendConfirm(const char* requestId, const char* name, T value, int ackCode, int ackVersion)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	doc[name]["value"] = value;
+	doc[name]["ac"] = ackCode;
+	doc[name]["av"] = ackVersion;
+
+	char json[JSON_MAX_SIZE];
+	serializeJson(doc, json);
+
+	AziotHub_.SendTwinPatch(requestId, json);
+}
+
+static void ReceivedTwinDocument(const char* json, const char* requestId)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant ver = doc["desired"]["$version"];
+	JsonVariant interval = doc["desired"]["TelemetryInterval"];
+	if (!ver.isNull() && !interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+
+		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
+	}
+}
+
+static void ReceivedTwinDesiredPatch(const char* json, const char* version)
+{
+	StaticJsonDocument<JSON_MAX_SIZE> doc;
+	if (deserializeJson(doc, json)) return;
+	JsonVariant ver = doc["$version"];
+	JsonVariant interval = doc["TelemetryInterval"];
+	if (!ver.isNull() && !interval.isNull())
+	{
+		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
+		TelemetryInterval = interval.as<int>() * 1000;
+
+		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
+	}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -162,6 +195,10 @@ void setup()
 		ConnectWiFi();
 		SyncTimeServer();
 		DeviceProvisioning();
+		
+		AziotHub_.SetMqttPacketSize(MQTT_PACKET_SIZE);
+		AziotHub_.ReceivedTwinDocumentCallback = ReceivedTwinDocument;
+		AziotHub_.ReceivedTwinDesiredPatchCallback = ReceivedTwinDesiredPatch;
 	}
 	else
 	{
@@ -231,11 +268,11 @@ void loop()
     static unsigned long reconnectTime;
 	if (!Storage::IdScope.empty())
 	{
-		if (!AziotHubIsConnected())
+		if (!AziotHub_.IsConnected())
 		{
 			Serial.printf("Connecting to Azure IoT Hub...\n");
 			const auto now = TimeManager_.GetEpochTime();
-			if (AziotHubConnect(HubHost_, DeviceId_, Storage::SymmetricKey, MODEL_ID, now + TOKEN_LIFESPAN) != 0)
+			if (AziotHub_.Connect(HubHost_, DeviceId_, Storage::SymmetricKey, MODEL_ID, now + TOKEN_LIFESPAN) != 0)
 			{
 				Serial.printf("> ERROR. Try again in 5 seconds.\n");
 				delay(5000);
@@ -244,23 +281,25 @@ void loop()
 
 			Serial.printf("> SUCCESS.\n");
 			reconnectTime = now + TOKEN_LIFESPAN * RECONNECT_RATE;
+
+			AziotHub_.RequestTwinDocument("get_twin");
 		}
 		else
 		{
 			if (TimeManager_.GetEpochTime() >= reconnectTime)
 			{
 				Serial.printf("Disconnect\n");
-				AziotHubDisconnect();
+				AziotHub_.Disconnect();
 				return;
 			}
 
-			AziotHubDoWork();
+			AziotHub_.DoWork();
 
 			static unsigned long nextTelemetrySendTime = 0;
 			if (millis() > nextTelemetrySendTime)
 			{
 				SendTelemetry();
-				nextTelemetrySendTime = millis() + 15000;
+				nextTelemetrySendTime = millis() + TelemetryInterval;
 			}
 		}
 	}
