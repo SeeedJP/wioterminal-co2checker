@@ -44,11 +44,15 @@ int AziotHub::Connect(const std::string& host, const std::string& deviceId, cons
     if (HubClient_.Init(host.c_str(), deviceId.c_str(),  modelId.c_str()) != 0) return -1;
     if (HubClient_.SetSAS(symmetricKey.c_str(), expirationEpochTime, GenerateEncryptedSignature) != 0) return -2;
 
-    Serial.printf("Hub:\n");
-    Serial.printf(" Host = %s\n", host.c_str());
-    Serial.printf(" Device id = %s\n", deviceId.c_str());
-    Serial.printf(" MQTT client id = %s\n", HubClient_.GetMqttClientId().c_str());
-    Serial.printf(" MQTT username = %s\n", HubClient_.GetMqttUsername().c_str());
+    Serial.println("Hub:");
+    Serial.print(" Host = ");
+    Serial.println(host.c_str());
+    Serial.print(" Device id = ");
+    Serial.println(deviceId.c_str());
+    Serial.print(" MQTT client id = ");
+    Serial.println(HubClient_.GetMqttClientId().c_str());
+    Serial.print(" MQTT username = ");
+    Serial.println(HubClient_.GetMqttUsername().c_str());
 
     Tcp_.setCACert(CERT_BALTIMORE_CYBERTRUST_ROOT_CA);
     Mqtt_.setBufferSize(MqttPacketSize_);
