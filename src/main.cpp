@@ -280,7 +280,7 @@ void loop()
 			}
 
 			Serial.printf("> SUCCESS.\n");
-			reconnectTime = now + TOKEN_LIFESPAN * RECONNECT_RATE;
+			reconnectTime = TimeManager_.GetEpochTime() + static_cast<unsigned long>(TOKEN_LIFESPAN * RECONNECT_RATE);
 
 			AziotHub_.RequestTwinDocument("get_twin");
 		}
