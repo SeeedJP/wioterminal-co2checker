@@ -116,14 +116,15 @@ static void ReceivedTwinDocument(const char* json, const char* requestId)
 	StaticJsonDocument<JSON_MAX_SIZE> doc;
 	if (deserializeJson(doc, json)) return;
 	JsonVariant ver = doc["desired"]["$version"];
+	if (ver.isNull()) return;
+
 	JsonVariant interval = doc["desired"]["TelemetryInterval"];
-	if (!ver.isNull() && !interval.isNull())
+	if (!interval.isNull())
 	{
 		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
 		TelemetryInterval = interval.as<int>() * 1000;
-
-		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
 	}
+	SendConfirm<int>("twin_confirm", "TelemetryInterval", TelemetryInterval / 1000, 200, ver.as<int>());
 }
 
 static void ReceivedTwinDesiredPatch(const char* json, const char* version)
@@ -131,13 +132,15 @@ static void ReceivedTwinDesiredPatch(const char* json, const char* version)
 	StaticJsonDocument<JSON_MAX_SIZE> doc;
 	if (deserializeJson(doc, json)) return;
 	JsonVariant ver = doc["$version"];
+	if (ver.isNull()) return;
+
 	JsonVariant interval = doc["TelemetryInterval"];
-	if (!ver.isNull() && !interval.isNull())
+	if (!interval.isNull())
 	{
 		Serial.printf("TelemetryInterval = %d\n", interval.as<int>());
 		TelemetryInterval = interval.as<int>() * 1000;
 
-		SendConfirm<int>("twin_confirm", "TelemetryInterval", interval.as<int>(), 200, ver.as<int>());
+		SendConfirm<int>("twin_confirm", "TelemetryInterval", TelemetryInterval / 1000, 200, ver.as<int>());
 	}
 }
 
