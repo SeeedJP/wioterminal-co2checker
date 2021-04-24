@@ -5,12 +5,6 @@
 
 class TimeManager
 {
-private:
-    WiFiUDP Udp_;
-	NTPClient Client_;
-    unsigned long CaptureTime_;
-    unsigned long EpochTime_;
-
 public:
     TimeManager();
     TimeManager(const TimeManager&) = delete;
@@ -18,5 +12,11 @@ public:
     
     bool Update();
     unsigned long GetEpochTime() const;
+
+private:
+    WiFiUDP Udp_;
+	NTPClient Client_;
+    unsigned long CaptureTime_;
+    unsigned long EpochTime_;
 
 };

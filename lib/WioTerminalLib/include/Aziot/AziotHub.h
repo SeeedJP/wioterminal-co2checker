@@ -7,15 +7,10 @@
 class AziotHub
 {
 public:
-    static AziotHub* Instance();
-
-private:
-    static AziotHub* Instance_;
-
-private:
     AziotHub();
+    AziotHub(const AziotHub&) = delete;
+    AziotHub& operator=(const AziotHub&) = delete;
 
-public:
     void SetMqttPacketSize(int size);
 
     void DoWork();

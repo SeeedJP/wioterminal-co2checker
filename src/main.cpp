@@ -35,7 +35,7 @@ static unsigned long WorkTime_;			// [msec.]
 #include "Helper/Nullable.h"
 
 static TimeManager TimeManager_;
-static AziotHub& AziotHub_ = *AziotHub::Instance();
+static AziotHub AziotHub_;
 static std::string HubHost_;
 static std::string DeviceId_;
 
@@ -69,10 +69,10 @@ static void DeviceProvisioning()
     DisplayPrintf(" Id scope = %s\n", Storage::IdScope.c_str());
     DisplayPrintf(" Registration id = %s\n", Storage::RegistrationId.c_str());
 
-	AziotDps& AziotDps_ = *AziotDps::Instance();
-	AziotDps_.SetMqttPacketSize(MQTT_PACKET_SIZE);
+	AziotDps aziotDps;
+	aziotDps.SetMqttPacketSize(MQTT_PACKET_SIZE);
 
-    if (AziotDps_.RegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
+    if (aziotDps.RegisterDevice(DPS_GLOBAL_DEVICE_ENDPOINT_HOST, Storage::IdScope, Storage::RegistrationId, Storage::SymmetricKey, MODEL_ID, TimeManager_.GetEpochTime() + TOKEN_LIFESPAN, &HubHost_, &DeviceId_) != 0)
     {
         DisplayPrintf("ERROR: RegisterDevice()\n");
 		return;

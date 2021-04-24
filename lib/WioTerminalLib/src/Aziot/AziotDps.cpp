@@ -6,16 +6,8 @@
 
 static WiFiClientSecure Tcp_;	// TODO
 
-AziotDps* AziotDps::Instance_ = nullptr;
 EasyAziotDpsClient AziotDps::DpsClient_;
 unsigned long AziotDps::DpsPublishTimeOfQueryStatus_ = 0;
-
-AziotDps* AziotDps::Instance()
-{
-    if (Instance_ == nullptr) Instance_ = new AziotDps();
-
-    return Instance_;
-}
 
 AziotDps::AziotDps() :
     MqttPacketSize_(256)

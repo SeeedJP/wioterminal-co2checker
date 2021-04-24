@@ -6,15 +6,10 @@
 class AziotDps
 {
 public:
-    static AziotDps* Instance();
-
-private:
-    static AziotDps* Instance_;
-
-private:
     AziotDps();
+    AziotDps(const AziotDps&) = delete;
+    AziotDps& operator=(const AziotDps&) = delete;
 
-public:
     void SetMqttPacketSize(int size);
 
     int RegisterDevice(const std::string& endpointHost, const std::string& idScope, const std::string& registrationId, const std::string& symmetricKey, const std::string& modelId, const uint64_t& expirationEpochTime, std::string* hubHost, std::string* deviceId);

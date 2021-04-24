@@ -7,17 +7,9 @@
 static WiFiClientSecure Tcp_;	// TODO
 static PubSubClient Mqtt_(Tcp_);
 
-AziotHub* AziotHub::Instance_ = nullptr;
 std::function<void(const char* json, const char* requestId)> AziotHub::ReceivedTwinDocumentCallback;
 std::function<void(const char* json, const char* version)> AziotHub::ReceivedTwinDesiredPatchCallback;
 EasyAziotHubClient AziotHub::HubClient_;
-
-AziotHub* AziotHub::Instance()
-{
-    if (Instance_ == nullptr) Instance_ = new AziotHub();
-
-    return Instance_;
-}
 
 AziotHub::AziotHub() :
     MqttPacketSize_(256)
