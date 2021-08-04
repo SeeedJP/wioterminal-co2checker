@@ -45,7 +45,7 @@ void MeasureRead()
 		{
 			TempAveBuf_.push_back(SensorScd30_.Temperature);
 			TempAve = TempAveBuf_.size() >= 1 ? TempAveBuf_.average() : NullableNullValue<typeof(TempAve)>();
-			if (NullableIsNull(TempAve)) TempAve -= TEMP_OFFSET;
+			if (!NullableIsNull(TempAve)) TempAve -= TEMP_OFFSET;
 		}
 	}
 
